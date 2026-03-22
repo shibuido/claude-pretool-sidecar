@@ -1,0 +1,1 @@
+{"tool_name":"Bash","tool_input":{"command":"ls"},"hook_event_name":"PreToolUse","session_id":"qa-test-005","unknown_future_field":"should be ignored","another_field":42}

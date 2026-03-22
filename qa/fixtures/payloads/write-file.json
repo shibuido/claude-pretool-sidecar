@@ -1,0 +1,1 @@
+{"tool_name":"Write","tool_input":{"file_path":"/tmp/qa-test.txt","content":"hello world"},"hook_event_name":"PreToolUse","session_id":"qa-test-003","cwd":"/tmp","permission_mode":"default"}
