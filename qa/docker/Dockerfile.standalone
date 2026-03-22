@@ -66,5 +66,5 @@ COPY examples/ /qa/examples/
 RUN chmod +x /qa/scripts/*.sh /qa/helpers/*.sh /qa/docker/*.sh 2>/dev/null || true
 
 # Default: run all QA tests
-ENTRYPOINT ["/qa/scripts/run-all-qa.sh"]
+ENTRYPOINT ["/qa/scripts/run-all-standalone.sh"]
 CMD ["--skip-cargo"]

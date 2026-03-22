@@ -1,9 +1,11 @@
 #!/bin/bash
-# Master QA Runner — runs all test suites and reports results.
+# Master Standalone QA Runner — runs all tests that do NOT require Claude Code CLI.
 #
 # Usage:
-#   ./run-all-qa.sh          # Run all tests
-#   ./run-all-qa.sh --skip-cargo  # Skip cargo test (run only QA scripts)
+#   ./run-all-standalone.sh              # Run all standalone tests
+#   ./run-all-standalone.sh --skip-cargo # Skip cargo test (run only QA scripts)
+#
+# For tests requiring live Claude Code CLI, see: run-all-live-claude-code.sh
 #
 # Exit code: 0 if all pass, 1 if any fail.
 
@@ -16,8 +18,6 @@ PROJECT_DIR="$(dirname "$QA_DIR")"
 SKIP_CARGO=false
 [ "${1:-}" = "--skip-cargo" ] && SKIP_CARGO=true
 
-TOTAL_PASS=0
-TOTAL_FAIL=0
 SUITES_PASSED=0
 SUITES_FAILED=0
 
@@ -41,7 +41,8 @@ run_suite() {
 }
 
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║  claude-pretool-sidecar — Full QA Suite                  ║"
+echo "║  claude-pretool-sidecar — Standalone QA Suite            ║"
+echo "║  (no Claude Code CLI required)                           ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Project: $PROJECT_DIR"
@@ -68,17 +69,17 @@ if [ "$SKIP_CARGO" = false ]; then
     "cd '$PROJECT_DIR' && cargo test --quiet 2>&1"
 fi
 
-# Step 3: QA test suites
-run_suite "Config Loading Tests" "$SCRIPT_DIR/test-config.sh"
-run_suite "Provider Execution Tests" "$SCRIPT_DIR/test-providers.sh"
-run_suite "Quorum Logic Tests" "$SCRIPT_DIR/test-quorum.sh"
-run_suite "Audit Logging Tests" "$SCRIPT_DIR/test-audit.sh"
-run_suite "Claude Code Hook Compliance" "$SCRIPT_DIR/test-hook-integration.sh"
+# Step 3: Standalone QA test suites
+run_suite "Config Loading Tests"      "$SCRIPT_DIR/standalone-config.sh"
+run_suite "Provider Execution Tests"  "$SCRIPT_DIR/standalone-providers.sh"
+run_suite "Quorum Logic Tests"        "$SCRIPT_DIR/standalone-quorum.sh"
+run_suite "Audit Logging Tests"       "$SCRIPT_DIR/standalone-audit.sh"
+run_suite "Hook Format Compliance"    "$SCRIPT_DIR/standalone-hook-format.sh"
 
 # Summary
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║  QA Summary                                              ║"
+echo "║  Standalone QA Summary                                   ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "  Suites passed: $SUITES_PASSED"
