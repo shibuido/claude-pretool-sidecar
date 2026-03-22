@@ -145,6 +145,9 @@ Use this checklist when performing manual QA on `claude-pretool-sidecar`. Each s
 - [ ] When `output = "stderr"`, audit entries appear on stderr
 - [ ] When `output = "/path/to/dir"`, files created as `audit-YYYY-MM-DD.jsonl`
 - [ ] Each log entry is valid JSON on a single line
+- [ ] Multiple calls same day append to same file
+- [ ] Different days create different files
+- [ ] Audit directory created automatically if missing
 
 ### 6.2 Entry Content
 
@@ -157,6 +160,9 @@ Use this checklist when performing manual QA on `claude-pretool-sidecar`. Each s
 - [ ] Each provider entry has: `name`, `vote`, `mode`, `response_time_ms`
 - [ ] `final_decision` matches the actual returned decision
 - [ ] `total_time_ms` is reasonable (> 0, < timeout)
+- [ ] FYI providers appear in `providers` array (with mode="fyi")
+- [ ] Provider `error` field populated on failures, null on success
+- [ ] Provider `reason` field captured when provider supplies one
 
 ### 6.3 Log Rotation — Per-File Limit
 
@@ -192,6 +198,13 @@ Use this checklist when performing manual QA on `claude-pretool-sidecar`. Each s
 - [ ] Mixed providers with quorum rules → correct aggregation
 - [ ] Crashing provider → handled per error_policy
 - [ ] FYI logger provider → runs but doesn't affect decision
+- [ ] FYI provider still logged in audit entry (visible for auditing)
+
+### 8.4 Fail-Mode Configurations
+
+- [ ] Fail-secure: `error_policy="deny"`, `max_deny=0` — any error blocks
+- [ ] Fail-open: `error_policy="allow"`, `default_decision="allow"` — errors pass through
+- [ ] Democratic: 3+ providers, `min_allow=2`, majority decides
 
 ### 8.2 With Claude Code Hook Format
 
@@ -216,6 +229,12 @@ Use this checklist when performing manual QA on `claude-pretool-sidecar`. Each s
 - [ ] Unicode in tool_input handled correctly
 - [ ] Concurrent invocations don't interfere (no shared state)
 - [ ] Audit log directory creation when it doesn't exist
+- [ ] Config path with spaces in path
+- [ ] Provider command with spaces in path
+- [ ] Provider args with special characters (quotes, spaces)
+- [ ] Extremely long provider name in audit log
+- [ ] Config with zero providers but audit enabled works
+- [ ] Empty TOML config file (all defaults applied)
 
 ---
 
