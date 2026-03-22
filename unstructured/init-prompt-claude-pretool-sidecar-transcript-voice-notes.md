@@ -47,6 +47,12 @@ Regarding the plugin, we would like it to contain skills that will have bundled 
 
 **User said:** We want to ensure that when decisions are made to allow or deny coming from the tools that are installed by users (configured decision hooks), that we also log those decisions for future auditability or debugging purposes. So we want to have in the logs information about which tool returned what, and how fast, for what input.
 
+### 2026-03-22 — User Clarification #3: Log rotation and size management
+
+**User said:** We want to be careful if those logs will not grow too much so we want to have both chunking on the time base (date in filename) and size limits. The system should delete older files if size is exceeded. If only the current file remains and it's too big, retain only the most recent lines. Stay within the limit.
+
+**Implication:** Implemented date-based chunking (`audit-YYYY-MM-DD.jsonl`), per-file truncation (keeps recent lines + sentinel), and total directory size enforcement (deletes oldest first). Configurable via `max_total_bytes` and `max_file_bytes`.
+
 **Implication:** The audit log must capture per-provider detail:
 - Provider name
 - Vote returned (allow/deny/passthrough/error)
