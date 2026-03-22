@@ -9,15 +9,36 @@ use crate::config::{ProviderConfig, ProviderMode, TimeoutConfig};
 use crate::hook::HookEvent;
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A vote returned by a provider (or derived from an error).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Vote {
     Allow,
     Deny,
     Passthrough,
     Error,
+}
+
+/// Detailed result from a single provider execution.
+/// Used for audit logging — captures timing and vote details.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderResult {
+    /// Provider name from config
+    pub name: String,
+    /// The vote (or error)
+    pub vote: Vote,
+    /// Provider mode (vote or fyi)
+    pub mode: String,
+    /// How long the provider took to respond (milliseconds)
+    pub response_time_ms: u64,
+    /// Optional reason from the provider
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Error message if the provider failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Response parsed from a provider's stdout.
@@ -28,15 +49,15 @@ struct ProviderResponse {
     reason: Option<String>,
 }
 
-/// Execute all configured providers and collect their votes.
+/// Execute all configured providers and collect detailed results.
 ///
-/// FYI providers are executed but their votes are not included in the result.
-/// Each provider runs as a separate process with the hook payload on stdin.
+/// Returns ProviderResult for every provider (including FYI).
+/// The caller uses mode to filter voting vs FYI results.
 pub fn execute_all(
     providers: &[ProviderConfig],
     event: &HookEvent,
     timeout_config: &TimeoutConfig,
-) -> Vec<Vote> {
+) -> Vec<ProviderResult> {
     let payload = match event.to_json() {
         Ok(json) => json,
         Err(e) => {
@@ -45,30 +66,38 @@ pub fn execute_all(
         }
     };
 
-    let mut votes = Vec::new();
+    let mut results = Vec::new();
 
     for provider in providers {
-        let vote = execute_one(provider, &payload, timeout_config);
-
-        match provider.mode {
-            ProviderMode::Vote => votes.push(vote),
-            ProviderMode::Fyi => {
-                // FYI providers: log the result but don't include in votes
-                eprintln!(
-                    "claude-pretool-sidecar: fyi provider '{}' completed: {:?}",
-                    provider.name, vote
-                );
-            }
-        }
+        let result = execute_one(provider, &payload, timeout_config);
+        results.push(result);
     }
 
-    votes
+    results
 }
 
-/// Execute a single provider and return its vote.
-fn execute_one(provider: &ProviderConfig, payload: &str, timeout_config: &TimeoutConfig) -> Vote {
+/// Extract only the votes from non-FYI providers (for quorum aggregation).
+pub fn votes_from_results(results: &[ProviderResult]) -> Vec<Vote> {
+    results
+        .iter()
+        .filter(|r| r.mode == "vote")
+        .map(|r| r.vote.clone())
+        .collect()
+}
+
+/// Execute a single provider and return its detailed result.
+fn execute_one(
+    provider: &ProviderConfig,
+    payload: &str,
+    timeout_config: &TimeoutConfig,
+) -> ProviderResult {
     let timeout_ms = provider.timeout.unwrap_or(timeout_config.provider_default);
     let timeout = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+    let mode = match provider.mode {
+        ProviderMode::Vote => "vote",
+        ProviderMode::Fyi => "fyi",
+    };
 
     // Spawn the provider process
     let mut child = match Command::new(&provider.command)
@@ -81,23 +110,31 @@ fn execute_one(provider: &ProviderConfig, payload: &str, timeout_config: &Timeou
     {
         Ok(child) => child,
         Err(e) => {
-            eprintln!(
-                "claude-pretool-sidecar: failed to spawn provider '{}': {e}",
-                provider.name
-            );
-            return Vote::Error;
+            let elapsed = start.elapsed();
+            return ProviderResult {
+                name: provider.name.clone(),
+                vote: Vote::Error,
+                mode: mode.to_string(),
+                response_time_ms: elapsed.as_millis() as u64,
+                reason: None,
+                error: Some(format!("failed to spawn: {e}")),
+            };
         }
     };
 
     // Write payload to stdin
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(e) = stdin.write_all(payload.as_bytes()) {
-            eprintln!(
-                "claude-pretool-sidecar: failed to write to provider '{}' stdin: {e}",
-                provider.name
-            );
+            let elapsed = start.elapsed();
             let _ = child.kill();
-            return Vote::Error;
+            return ProviderResult {
+                name: provider.name.clone(),
+                vote: Vote::Error,
+                mode: mode.to_string(),
+                response_time_ms: elapsed.as_millis() as u64,
+                reason: None,
+                error: Some(format!("failed to write stdin: {e}")),
+            };
         }
         // Drop stdin to signal EOF
     }
@@ -106,73 +143,84 @@ fn execute_one(provider: &ProviderConfig, payload: &str, timeout_config: &Timeou
     let output = match child.wait_with_output() {
         Ok(output) => output,
         Err(e) => {
-            eprintln!(
-                "claude-pretool-sidecar: provider '{}' wait failed: {e}",
-                provider.name
-            );
-            return Vote::Error;
+            let elapsed = start.elapsed();
+            return ProviderResult {
+                name: provider.name.clone(),
+                vote: Vote::Error,
+                mode: mode.to_string(),
+                response_time_ms: elapsed.as_millis() as u64,
+                reason: None,
+                error: Some(format!("wait failed: {e}")),
+            };
         }
     };
 
-    // Note: proper timeout handling requires spawning a thread or using async.
-    // For now, we rely on the process completing. Timeout enforcement will be
-    // added in a future iteration (see FUTURE_WORK.md).
-    let _ = timeout; // suppress unused warning for now
+    let elapsed = start.elapsed();
+    let _ = timeout; // TODO: proper timeout enforcement
 
     // Check exit code
     if !output.status.success() {
-        eprintln!(
-            "claude-pretool-sidecar: provider '{}' exited with status {}",
-            provider.name,
-            output.status
-        );
-        return Vote::Error;
+        return ProviderResult {
+            name: provider.name.clone(),
+            vote: Vote::Error,
+            mode: mode.to_string(),
+            response_time_ms: elapsed.as_millis() as u64,
+            reason: None,
+            error: Some(format!("exited with status {}", output.status)),
+        };
     }
 
     // Parse stdout
     let stdout = match String::from_utf8(output.stdout) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "claude-pretool-sidecar: provider '{}' stdout is not valid UTF-8: {e}",
-                provider.name
-            );
-            return Vote::Error;
+            return ProviderResult {
+                name: provider.name.clone(),
+                vote: Vote::Error,
+                mode: mode.to_string(),
+                response_time_ms: elapsed.as_millis() as u64,
+                reason: None,
+                error: Some(format!("stdout not valid UTF-8: {e}")),
+            };
         }
     };
 
-    parse_provider_response(&stdout, &provider.name)
+    let (vote, reason, error) = parse_provider_response(&stdout, &provider.name);
+
+    ProviderResult {
+        name: provider.name.clone(),
+        vote,
+        mode: mode.to_string(),
+        response_time_ms: elapsed.as_millis() as u64,
+        reason,
+        error,
+    }
 }
 
-/// Parse a provider's stdout JSON into a Vote.
-fn parse_provider_response(stdout: &str, provider_name: &str) -> Vote {
+/// Parse a provider's stdout JSON into a Vote, reason, and optional error.
+fn parse_provider_response(stdout: &str, provider_name: &str) -> (Vote, Option<String>, Option<String>) {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        eprintln!("claude-pretool-sidecar: provider '{provider_name}' returned empty output");
-        return Vote::Error;
+        return (Vote::Error, None, Some(format!("provider '{provider_name}' returned empty output")));
     }
 
     let response: ProviderResponse = match serde_json::from_str(trimmed) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!(
-                "claude-pretool-sidecar: provider '{provider_name}' returned invalid JSON: {e}"
-            );
-            return Vote::Error;
+            return (Vote::Error, None, Some(format!("provider '{provider_name}' invalid JSON: {e}")));
         }
     };
 
-    match response.decision.as_str() {
+    let vote = match response.decision.as_str() {
         "allow" => Vote::Allow,
         "deny" => Vote::Deny,
         "passthrough" => Vote::Passthrough,
         other => {
-            eprintln!(
-                "claude-pretool-sidecar: provider '{provider_name}' returned unknown decision: '{other}'"
-            );
-            Vote::Error
+            return (Vote::Error, None, Some(format!("provider '{provider_name}' unknown decision: '{other}'")));
         }
-    }
+    };
+
+    (vote, response.reason, None)
 }
 
 #[cfg(test)]
@@ -187,47 +235,57 @@ mod tests {
     /// A valid "allow" response should parse to Vote::Allow.
     #[test]
     fn parse_allow_response() {
-        let stdout = r#"{"decision": "allow"}"#;
-        assert_eq!(parse_provider_response(stdout, "test"), Vote::Allow);
+        let (vote, _, error) = parse_provider_response(r#"{"decision": "allow"}"#, "test");
+        assert_eq!(vote, Vote::Allow);
+        assert!(error.is_none());
     }
 
     /// A valid "deny" response with a reason should parse to Vote::Deny.
     #[test]
     fn parse_deny_with_reason() {
-        let stdout = r#"{"decision": "deny", "reason": "dangerous"}"#;
-        assert_eq!(parse_provider_response(stdout, "test"), Vote::Deny);
+        let (vote, reason, _) = parse_provider_response(
+            r#"{"decision": "deny", "reason": "dangerous"}"#,
+            "test",
+        );
+        assert_eq!(vote, Vote::Deny);
+        assert_eq!(reason, Some("dangerous".to_string()));
     }
 
     /// A valid "passthrough" response should parse to Vote::Passthrough.
     #[test]
     fn parse_passthrough_response() {
-        let stdout = r#"{"decision": "passthrough"}"#;
-        assert_eq!(parse_provider_response(stdout, "test"), Vote::Passthrough);
+        let (vote, _, _) = parse_provider_response(r#"{"decision": "passthrough"}"#, "test");
+        assert_eq!(vote, Vote::Passthrough);
     }
 
     /// Empty output should be treated as an error.
     #[test]
     fn empty_output_is_error() {
-        assert_eq!(parse_provider_response("", "test"), Vote::Error);
+        let (vote, _, error) = parse_provider_response("", "test");
+        assert_eq!(vote, Vote::Error);
+        assert!(error.is_some());
     }
 
     /// Invalid JSON should be treated as an error.
     #[test]
     fn invalid_json_is_error() {
-        assert_eq!(parse_provider_response("not json", "test"), Vote::Error);
+        let (vote, _, error) = parse_provider_response("not json", "test");
+        assert_eq!(vote, Vote::Error);
+        assert!(error.is_some());
     }
 
     /// Unknown decision value should be treated as an error.
     #[test]
     fn unknown_decision_is_error() {
-        let stdout = r#"{"decision": "maybe"}"#;
-        assert_eq!(parse_provider_response(stdout, "test"), Vote::Error);
+        let (vote, _, error) = parse_provider_response(r#"{"decision": "maybe"}"#, "test");
+        assert_eq!(vote, Vote::Error);
+        assert!(error.is_some());
     }
 
     /// Output with extra whitespace/newlines should still parse.
     #[test]
     fn whitespace_trimmed() {
-        let stdout = "  \n{\"decision\": \"allow\"}\n  ";
-        assert_eq!(parse_provider_response(stdout, "test"), Vote::Allow);
+        let (vote, _, _) = parse_provider_response("  \n{\"decision\": \"allow\"}\n  ", "test");
+        assert_eq!(vote, Vote::Allow);
     }
 }

@@ -37,4 +37,22 @@ Regarding the plugin, we would like it to contain skills that will have bundled 
 
 ## Clarification Q&A Log
 
-*(Will be appended as questions arise and answers are provided)*
+### 2026-03-22 — User Clarification #1: Dual-hook logging for pattern analysis
+
+**User said:** The design should allow supporting a use case when user apart from being able to decide to allow or deny using different additional subsystems, will have logs on both pre-tool use and post after-tool use, to allow later to reason from the logs which patterns of approvals are to consider to be automated.
+
+**Implication:** The tool must support both PreToolUse and PostToolUse hooks. The PostToolUse hook correlates with the PreToolUse hook to confirm which tools actually executed. By analyzing these paired logs over time, users can identify patterns (e.g., "Bash ls is always approved") to build auto-approval rules.
+
+### 2026-03-22 — User Clarification #2: Audit logging with provider details
+
+**User said:** We want to ensure that when decisions are made to allow or deny coming from the tools that are installed by users (configured decision hooks), that we also log those decisions for future auditability or debugging purposes. So we want to have in the logs information about which tool returned what, and how fast, for what input.
+
+**Implication:** The audit log must capture per-provider detail:
+- Provider name
+- Vote returned (allow/deny/passthrough/error)
+- Response time (milliseconds)
+- The input that was sent (tool_name + tool_input)
+- Timestamp
+- Final aggregated decision
+
+This is separate from the FYI logger — this is built-in audit logging of the sidecar's own decision-making process.

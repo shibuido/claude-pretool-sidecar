@@ -37,6 +37,34 @@ pub struct Config {
 
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+
+    #[serde(default)]
+    pub audit: AuditConfig,
+}
+
+/// Audit logging configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuditConfig {
+    /// Whether audit logging is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Output destination: file path or "stderr".
+    #[serde(default = "default_audit_output")]
+    pub output: String,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            output: default_audit_output(),
+        }
+    }
+}
+
+fn default_audit_output() -> String {
+    "stderr".to_string()
 }
 
 /// Quorum rules for vote aggregation.
