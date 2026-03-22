@@ -1,0 +1,6 @@
+# Docker build context exclusions
+target/
+.git/
+.claude/
+*.md
+!qa/**/*.md

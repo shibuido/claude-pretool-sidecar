@@ -48,10 +48,19 @@ echo "Project: $PROJECT_DIR"
 echo "Date:    $(date -Iseconds)"
 echo ""
 
-# Step 1: Build
-echo "Building project..."
-(cd "$PROJECT_DIR" && cargo build --quiet 2>/dev/null)
-echo "Build complete."
+# Step 1: Build (skip if binary already exists, e.g. in Docker)
+BINARY=$(command -v claude-pretool-sidecar 2>/dev/null || echo "$PROJECT_DIR/target/debug/claude-pretool-sidecar")
+if [ -x "$BINARY" ]; then
+  echo "Binary found: $BINARY"
+elif command -v cargo > /dev/null 2>&1; then
+  echo "Building project..."
+  (cd "$PROJECT_DIR" && cargo build --quiet 2>/dev/null)
+  echo "Build complete."
+else
+  echo "ERROR: No binary found and cargo not available."
+  echo "Run 'cargo build' first or use the Docker environment."
+  exit 1
+fi
 
 # Step 2: Cargo tests (unit + integration)
 if [ "$SKIP_CARGO" = false ]; then

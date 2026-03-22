@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 QA_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_DIR="$(dirname "$QA_DIR")"
-BINARY="$PROJECT_DIR/target/debug/claude-pretool-sidecar"
+BINARY=$(command -v claude-pretool-sidecar 2>/dev/null || echo "$PROJECT_DIR/target/debug/claude-pretool-sidecar")
 HELPERS="$QA_DIR/helpers"
 PROVIDER="$HELPERS/provider-echo.sh"
 
@@ -22,7 +22,7 @@ pass() { PASS=$((PASS + 1)); echo "  PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 # Build if needed
-[ -f "$BINARY" ] || (cd "$PROJECT_DIR" && cargo build --quiet 2>/dev/null)
+[ -x "$BINARY" ] || { command -v cargo > /dev/null 2>&1 && (cd "$PROJECT_DIR" && cargo build --quiet 2>/dev/null); }
 
 PAYLOAD=$("$HELPERS/gen-payload.sh" bash "ls -la")
 
