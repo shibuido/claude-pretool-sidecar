@@ -1,0 +1,26 @@
+[package]
+name = "claude-pretool-sidecar"
+version = "0.1.0"
+edition = "2024"
+description = "A composable sidecar for Claude Code hooks that aggregates tool-approval votes from multiple providers"
+license = "MIT"
+repository = "https://github.com/shibuido/claude-pretool-sidecar"
+
+[[bin]]
+name = "claude-pretool-sidecar"
+path = "src/main.rs"
+
+[[bin]]
+name = "claude-pretool-logger"
+path = "src/bin/logger.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
