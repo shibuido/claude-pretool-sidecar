@@ -58,7 +58,7 @@ echo ""
 # Prerequisite check
 if ! command -v claude > /dev/null 2>&1; then
   echo "ERROR: Claude Code CLI not found."
-  echo "Install: npm install -g @anthropic-ai/claude-code"
+  echo "Install: curl -fsSL https://claude.ai/install.sh | bash"
   exit 1
 fi
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then

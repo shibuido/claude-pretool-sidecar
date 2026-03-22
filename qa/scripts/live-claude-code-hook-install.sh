@@ -24,7 +24,7 @@ fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 # Verify prerequisites
 if ! command -v claude > /dev/null 2>&1; then
-  echo "SKIP: Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+  echo "SKIP: Claude Code CLI not found. Install: curl -fsSL https://claude.ai/install.sh | bash"
   exit 0
 fi
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then

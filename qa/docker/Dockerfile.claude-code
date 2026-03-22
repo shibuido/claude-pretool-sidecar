@@ -1,11 +1,14 @@
 # QA environment WITH Claude Code CLI for live hook integration tests.
 #
-# This image extends the standalone QA environment by adding Node.js
-# and the Claude Code CLI, enabling tests that exercise the sidecar
-# as a real Claude Code PreToolUse/PostToolUse hook.
+# Uses the official Claude Code installer (standalone binary, no Node.js needed).
 #
 # Authentication: pass ANTHROPIC_API_KEY at runtime:
 #   docker run -e ANTHROPIC_API_KEY="sk-ant-..." cpts-claude-code-image
+#
+# Install methods documented at:
+#   https://claude.com/download
+#   https://code.claude.com/docs/en/overview
+#   curl -fsSL https://claude.ai/install.sh | bash
 #
 # Multi-stage build:
 #   Stage 1: Rust build (same as standalone)
@@ -40,7 +43,7 @@ LABEL maintainer="shibuido" \
       description="QA environment for claude-pretool-sidecar WITH Claude Code CLI" \
       org.opencontainers.image.source="https://github.com/shibuido/claude-pretool-sidecar"
 
-# Layer 1: System deps + Node.js (most stable)
+# Layer 1: System deps (most stable)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     jq \
@@ -51,15 +54,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 22.x (LTS) via NodeSource
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Layer 2: Install Claude Code CLI via official installer
+#   The installer downloads a standalone binary (no Node.js needed).
+#   It detects platform/arch and verifies checksums.
+#   Ref: https://claude.com/download
+#   Alt: npm install -g @anthropic-ai/claude-code (requires Node.js)
+#   Alt: ghcr.io/anthropics/devcontainer-features/claude-code:1.0 (devcontainers)
+ENV HOME=/root
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Layer 2: Install Claude Code CLI (changes less often than our code)
-RUN --mount=type=cache,target=/root/.npm \
-    npm install -g @anthropic-ai/claude-code \
-    && claude --version
+# The installer places the binary under $HOME/.local/bin/
+# Set PATH so both RUN and runtime find it
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Verify installation
+RUN claude --version
 
 WORKDIR /qa
 

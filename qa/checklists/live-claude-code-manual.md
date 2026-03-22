@@ -6,7 +6,7 @@ These tests require a working Claude Code CLI installation with a valid `ANTHROP
 
 **Prerequisites:**
 
-* Claude Code CLI installed (`npm install -g @anthropic-ai/claude-code`)
+* Claude Code CLI installed (`curl -fsSL https://claude.ai/install.sh | bash`)
 * `ANTHROPIC_API_KEY` environment variable set
 * `claude-pretool-sidecar` binary in PATH
 * These tests make real API calls and cost money
