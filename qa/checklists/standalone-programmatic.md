@@ -83,30 +83,61 @@ This document maps automated test scripts to the features they cover. Each scrip
 | 6 | Realistic payloads | Bash, Write, Edit, Read payloads all work |
 | 7 | Exit code | Always exits 0 on successful processing |
 
+### `qa/scripts/live-claude-code-hook-install.sh` — Hook Installation (requires CC CLI)
+
+| # | Test | Checks |
+|---|------|--------|
+| 1 | Valid hook settings | Generated settings.local.json is valid JSON |
+| 2 | CC accepts settings | Claude Code starts without errors |
+| 3 | Dual-hook config | Pre + Post hook settings valid |
+| 4 | Audit-enabled hook | Config with audit logging generates correctly |
+| 5 | Binary accessible | Sidecar binary is executable from hook context |
+
+### `qa/scripts/live-claude-code-hook-execution.sh` — Hook Execution (requires CC CLI + API key)
+
+| # | Test | Checks |
+|---|------|--------|
+| 1 | Hook invocation | Sidecar invoked when Claude uses tools |
+| 2 | Tool name in audit | Audit log captures correct tool_name |
+| 3 | Provider vote | Provider vote recorded in audit |
+| 4 | Provider timing | response_time_ms is recorded |
+| 5 | Passthrough works | Sidecar doesn't block Claude |
+| 6 | Audit format | Audit log passes format validation |
+
 ## Running Tests
 
-### All automated tests:
+### Standalone tests (no Claude Code needed):
 ```bash
-qa/scripts/run-all-qa.sh
+qa/scripts/run-all-standalone.sh
 ```
 
-### Individual test suites:
+### Live Claude Code tests (requires API key):
 ```bash
-qa/scripts/test-config.sh
-qa/scripts/test-providers.sh
-qa/scripts/test-quorum.sh
-qa/scripts/test-audit.sh
-qa/scripts/test-hook-integration.sh
+export ANTHROPIC_API_KEY="sk-ant-..."
+qa/scripts/run-all-live-claude-code.sh
+```
+
+### Individual standalone suites:
+```bash
+qa/scripts/standalone-config.sh
+qa/scripts/standalone-providers.sh
+qa/scripts/standalone-quorum.sh
+qa/scripts/standalone-audit.sh
+qa/scripts/standalone-hook-format.sh
 ```
 
 ### In Docker:
 ```bash
-qa/docker/qa-docker.sh test
+qa/docker/cpts-standalone.sh test                # Standalone
+qa/docker/cpts-claude-code.sh test               # Live CC (needs API key)
+qa/docker/cpts-claude-code.sh test-standalone    # Standalone in CC image
 ```
 
 ## Adding New Tests
 
-1. Add test to the appropriate `qa/scripts/test-*.sh` script
+1. Add test to the appropriate `qa/scripts/` script:
+   - `standalone-*.sh` for tests without Claude Code
+   - `live-claude-code-*.sh` for tests requiring Claude Code CLI
 2. Update this checklist with the new test case
 3. If new helper fixtures are needed, add to `qa/helpers/` or `qa/fixtures/`
 4. Ensure the Docker environment includes any new dependencies
