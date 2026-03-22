@@ -93,9 +93,11 @@ EOF
 
 # Test 1: Run Claude with a simple query that should trigger a Read tool
 echo "[1] Claude Code invokes sidecar hook on tool use"
+# --dangerously-skip-permissions: required for non-interactive testing in containers
+# --settings: inject our hook configuration
 CLAUDE_OUTPUT=$(cd "$WORKSPACE" && claude -p \
-  --allowedTools "Read" \
   --dangerously-skip-permissions \
+  --allowedTools "Read" \
   "Read the file test.txt and tell me its contents. Reply with just the contents, nothing else." \
   2>/dev/null || true)
 

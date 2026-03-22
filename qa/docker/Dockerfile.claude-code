@@ -58,14 +58,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   The installer downloads a standalone binary (no Node.js needed).
 #   It detects platform/arch and verifies checksums.
 #   Ref: https://claude.com/download
-#   Alt: npm install -g @anthropic-ai/claude-code (requires Node.js)
-#   Alt: ghcr.io/anthropics/devcontainer-features/claude-code:1.0 (devcontainers)
+#   Alt: npm install -g @anthropic-ai/claude-code (requires Node.js, deprecated)
+#   Alt: ghcr.io/anthropics/devcontainer-features/claude-code:1.0 (devcontainers only)
+#   Pin version: curl -fsSL https://claude.ai/install.sh | bash -s 1.0.58
 ENV HOME=/root
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # The installer places the binary under $HOME/.local/bin/
-# Set PATH so both RUN and runtime find it
 ENV PATH="/root/.local/bin:${PATH}"
+
+# Disable auto-updater in container (no point in background updates)
+RUN mkdir -p /root/.claude && \
+    echo '{"env":{"DISABLE_AUTOUPDATER":"1"}}' > /root/.claude/settings.json
 
 # Verify installation
 RUN claude --version
