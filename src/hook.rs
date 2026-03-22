@@ -3,16 +3,18 @@
 //! Defines the data structures for Claude Code hook events (input from stdin)
 //! and hook responses (output to stdout).
 //!
-//! The exact fields are based on the Claude Code Hooks specification.
-//! See `docs/design/architecture.md` for the mapping from Claude Code's
-//! hook format to our internal types.
+//! Based on the Claude Code Hooks specification:
+//! - Input: JSON with tool_name, tool_input, hook_event_name, session_id, etc.
+//! - Output: JSON with hookSpecificOutput.permissionDecision for PreToolUse
+//! - Exit code 0 = success, exit code 2 = blocking error
 
 use serde::{Deserialize, Serialize};
 
 /// The hook event payload received from Claude Code on stdin.
 ///
-/// This represents the PreToolUse (or PostToolUse) hook invocation.
-/// Claude Code sends this as JSON when the hook fires.
+/// Claude Code sends this JSON to all hook commands via stdin.
+/// Fields vary by hook event type; we capture the common ones
+/// and preserve the full payload for forwarding to providers.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HookEvent {
     /// The name of the tool being invoked (e.g., "Bash", "Read", "Write")
@@ -21,16 +23,28 @@ pub struct HookEvent {
     /// The tool's input parameters (tool-specific JSON object)
     pub tool_input: serde_json::Value,
 
-    /// The type of hook event
-    #[serde(default = "default_hook_type")]
-    pub hook_event: String,
+    /// The hook event name (e.g., "PreToolUse", "PostToolUse")
+    #[serde(default = "default_hook_event_name")]
+    pub hook_event_name: String,
 
-    /// Session identifier (if provided by Claude Code)
+    /// Session identifier
     #[serde(default)]
     pub session_id: Option<String>,
+
+    /// Path to the transcript file
+    #[serde(default)]
+    pub transcript_path: Option<String>,
+
+    /// Current working directory
+    #[serde(default)]
+    pub cwd: Option<String>,
+
+    /// Permission mode ("ask", "allow", etc.)
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
 
-fn default_hook_type() -> String {
+fn default_hook_event_name() -> String {
     "PreToolUse".to_string()
 }
 
@@ -46,7 +60,7 @@ impl HookEvent {
     }
 }
 
-/// The decision returned by the sidecar to Claude Code.
+/// Internal decision type used by the sidecar's quorum logic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Decision {
@@ -65,30 +79,77 @@ impl std::fmt::Display for Decision {
     }
 }
 
+/// The hook-specific output for PreToolUse events.
+///
+/// Claude Code expects this nested structure inside the response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookSpecificOutput {
+    /// The permission decision: "allow", "deny", or "ask"
+    pub permission_decision: String,
+
+    /// Optional: modified tool input (can alter what the tool receives)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_input: Option<serde_json::Value>,
+}
+
 /// The hook response written to stdout for Claude Code.
 ///
-/// The exact format depends on Claude Code's hook response specification.
-/// This will be refined once research confirms the expected output format.
+/// This matches the Claude Code hook output format:
+/// - hookSpecificOutput: contains the permission decision
+/// - systemMessage: optional message shown to Claude
+///
+/// For passthrough, we output an empty JSON object `{}` (exit 0, no decision).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HookResponse {
-    pub decision: Decision,
-
+    /// Hook-specific output with permission decision
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    pub hook_specific_output: Option<HookSpecificOutput>,
+
+    /// Optional message for Claude's context
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_message: Option<String>,
 }
 
 impl HookResponse {
-    pub fn new(decision: Decision) -> Self {
+    /// Create a response that allows the tool call.
+    pub fn allow() -> Self {
         Self {
-            decision,
-            reason: None,
+            hook_specific_output: Some(HookSpecificOutput {
+                permission_decision: "allow".to_string(),
+                updated_input: None,
+            }),
+            system_message: None,
         }
     }
 
-    pub fn with_reason(decision: Decision, reason: String) -> Self {
+    /// Create a response that denies the tool call.
+    pub fn deny(reason: Option<String>) -> Self {
         Self {
-            decision,
-            reason: Some(reason),
+            hook_specific_output: Some(HookSpecificOutput {
+                permission_decision: "deny".to_string(),
+                updated_input: None,
+            }),
+            system_message: reason,
+        }
+    }
+
+    /// Create a passthrough response (empty object — no decision).
+    /// Claude Code treats this as "hook has no opinion."
+    pub fn passthrough() -> Self {
+        Self {
+            hook_specific_output: None,
+            system_message: None,
+        }
+    }
+
+    /// Create a response from an internal Decision.
+    pub fn from_decision(decision: Decision, reason: Option<String>) -> Self {
+        match decision {
+            Decision::Allow => Self::allow(),
+            Decision::Deny => Self::deny(reason),
+            Decision::Passthrough => Self::passthrough(),
         }
     }
 }
@@ -103,28 +164,33 @@ mod tests {
     /// that Claude Code sends to PreToolUse hooks via stdin.
 
     /// A minimal hook event with just tool_name and tool_input should parse.
-    /// The hook_event field defaults to "PreToolUse" when absent.
+    /// The hook_event_name field defaults to "PreToolUse" when absent.
     #[test]
     fn parse_minimal_hook_event() {
         let json = r#"{"tool_name": "Bash", "tool_input": {"command": "ls"}}"#;
         let event = HookEvent::from_json(json).unwrap();
         assert_eq!(event.tool_name, "Bash");
-        assert_eq!(event.hook_event, "PreToolUse");
+        assert_eq!(event.hook_event_name, "PreToolUse");
         assert!(event.session_id.is_none());
     }
 
-    /// A full hook event with all fields should parse correctly.
+    /// A full hook event with all Claude Code fields should parse correctly.
     #[test]
     fn parse_full_hook_event() {
         let json = r#"{
             "tool_name": "Write",
             "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
-            "hook_event": "PreToolUse",
-            "session_id": "sess-abc123"
+            "hook_event_name": "PreToolUse",
+            "session_id": "sess-abc123",
+            "transcript_path": "/tmp/transcript.txt",
+            "cwd": "/home/user/project",
+            "permission_mode": "ask"
         }"#;
         let event = HookEvent::from_json(json).unwrap();
         assert_eq!(event.tool_name, "Write");
         assert_eq!(event.session_id, Some("sess-abc123".to_string()));
+        assert_eq!(event.cwd, Some("/home/user/project".to_string()));
+        assert_eq!(event.permission_mode, Some("ask".to_string()));
     }
 
     /// Unknown extra fields should be silently ignored (forward compatibility).
@@ -139,39 +205,50 @@ mod tests {
         assert_eq!(event.tool_name, "Bash");
     }
 
-    /// # Decision Serialization Tests
+    /// # HookResponse Serialization Tests
+    ///
+    /// These tests verify that responses match Claude Code's expected format.
 
-    /// Decision values serialize to lowercase strings.
+    /// Allow response produces correct hookSpecificOutput format.
     #[test]
-    fn decision_serializes_lowercase() {
+    fn allow_response_format() {
+        let resp = HookResponse::allow();
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
-            serde_json::to_string(&Decision::Allow).unwrap(),
-            r#""allow""#
+            parsed["hookSpecificOutput"]["permissionDecision"],
+            "allow"
         );
-        assert_eq!(
-            serde_json::to_string(&Decision::Deny).unwrap(),
-            r#""deny""#
-        );
-        assert_eq!(
-            serde_json::to_string(&Decision::Passthrough).unwrap(),
-            r#""passthrough""#
-        );
+        assert!(parsed.get("systemMessage").is_none());
     }
 
-    /// HookResponse serializes correctly, omitting reason when None.
+    /// Deny response includes hookSpecificOutput and optional systemMessage.
     #[test]
-    fn response_without_reason_omits_field() {
-        let resp = HookResponse::new(Decision::Allow);
+    fn deny_response_with_reason() {
+        let resp = HookResponse::deny(Some("dangerous command".to_string()));
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(!json.contains("reason"));
-        assert!(json.contains(r#""decision":"allow""#));
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(parsed["systemMessage"], "dangerous command");
     }
 
-    /// HookResponse includes reason when provided.
+    /// Passthrough response is an empty JSON object (no hookSpecificOutput).
     #[test]
-    fn response_with_reason_includes_field() {
-        let resp = HookResponse::with_reason(Decision::Deny, "dangerous command".to_string());
+    fn passthrough_response_is_empty_object() {
+        let resp = HookResponse::passthrough();
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains(r#""reason":"dangerous command""#));
+        assert_eq!(json, "{}");
+    }
+
+    /// from_decision correctly maps internal decisions to hook responses.
+    #[test]
+    fn from_decision_maps_correctly() {
+        let allow = HookResponse::from_decision(Decision::Allow, None);
+        let json = serde_json::to_string(&allow).unwrap();
+        assert!(json.contains("permissionDecision"));
+
+        let passthrough = HookResponse::from_decision(Decision::Passthrough, None);
+        let json = serde_json::to_string(&passthrough).unwrap();
+        assert_eq!(json, "{}");
     }
 }

@@ -54,8 +54,8 @@ fn main() {
     // Aggregate votes using quorum rules
     let decision = quorum::aggregate(&config.quorum, &votes);
 
-    // Output decision as JSON to stdout
-    let output = hook::HookResponse::new(decision);
+    // Output decision as Claude Code hook response format on stdout
+    let output = hook::HookResponse::from_decision(decision, None);
     match serde_json::to_string(&output) {
         Ok(json) => println!("{json}"),
         Err(e) => {

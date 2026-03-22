@@ -4,6 +4,10 @@
 //! reading a hook payload from stdin, executing mock provider scripts,
 //! and returning the aggregated decision on stdout.
 //!
+//! The output format matches Claude Code's hook response specification:
+//! - Allow/Deny: `{"hookSpecificOutput":{"permissionDecision":"allow|deny"}}`
+//! - Passthrough: `{}` (empty JSON object, no decision)
+//!
 //! Each test creates a temporary config file pointing to mock provider
 //! scripts in `tests/fixtures/`, then runs the sidecar binary with
 //! a hook payload on stdin.
@@ -29,10 +33,20 @@ fn read_payload(name: &str) -> String {
     fs::read_to_string(fixtures_dir().join(name)).unwrap()
 }
 
+/// Helper: extract the permissionDecision from a Claude Code hook response.
+/// Returns None for passthrough (empty object).
+fn extract_decision(response: &serde_json::Value) -> Option<&str> {
+    response
+        .get("hookSpecificOutput")
+        .and_then(|h| h.get("permissionDecision"))
+        .and_then(|d| d.as_str())
+}
+
 /// # Single Allow Provider
 ///
 /// When one provider always allows and quorum requires min_allow=1,
-/// the sidecar should output a JSON response with decision "allow".
+/// the sidecar should output a Claude Code hook response with
+/// hookSpecificOutput.permissionDecision = "allow".
 #[test]
 fn single_allow_provider_returns_allow() {
     let config = format!(
@@ -61,13 +75,13 @@ fn single_allow_provider_returns_allow() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(response["decision"], "allow");
+    assert_eq!(extract_decision(&response), Some("allow"));
 }
 
 /// # Single Deny Provider
 ///
 /// When one provider always denies and max_deny=0,
-/// the sidecar should output "deny".
+/// the sidecar should output permissionDecision = "deny".
 #[test]
 fn single_deny_provider_returns_deny() {
     let config = format!(
@@ -96,7 +110,7 @@ fn single_deny_provider_returns_deny() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(response["decision"], "deny");
+    assert_eq!(extract_decision(&response), Some("deny"));
 }
 
 /// # Crashing Provider with deny error_policy
@@ -132,13 +146,13 @@ fn crashing_provider_with_deny_error_policy_returns_deny() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(response["decision"], "deny");
+    assert_eq!(extract_decision(&response), Some("deny"));
 }
 
 /// # FYI Provider Does Not Affect Voting
 ///
 /// An FYI provider's output is ignored. With only FYI providers and
-/// min_allow=0, the decision should be based on quorum defaults.
+/// min_allow=0, quorum is trivially met (0 >= 0) → allow.
 #[test]
 fn fyi_provider_does_not_affect_votes() {
     let config = format!(
@@ -168,7 +182,7 @@ fn fyi_provider_does_not_affect_votes() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     // FYI deny provider is ignored; with min_allow=0 quorum is trivially met → allow
-    assert_eq!(response["decision"], "allow");
+    assert_eq!(extract_decision(&response), Some("allow"));
 }
 
 /// # Mixed Providers: Two Allow, One Deny, max_deny=1
@@ -214,13 +228,14 @@ fn mixed_providers_with_tolerated_deny() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(response["decision"], "allow");
+    assert_eq!(extract_decision(&response), Some("allow"));
 }
 
-/// # Bad JSON Provider
+/// # Bad JSON Provider → Passthrough
 ///
 /// When a provider returns invalid JSON, it's treated as an error.
 /// With error_policy=passthrough and min_allow=1, quorum is not met.
+/// Passthrough produces an empty JSON object `{}` (no permissionDecision).
 #[test]
 fn bad_json_provider_treated_as_error() {
     let config = format!(
@@ -251,5 +266,7 @@ fn bad_json_provider_treated_as_error() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(response["decision"], "passthrough");
+    // Passthrough = empty object, no hookSpecificOutput
+    assert_eq!(extract_decision(&response), None);
+    assert_eq!(response, serde_json::json!({}));
 }
