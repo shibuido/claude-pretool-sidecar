@@ -43,15 +43,27 @@ pub struct Config {
 }
 
 /// Audit logging configuration.
+///
+/// Supports date-based log file chunking and automatic size management.
+/// See `docs/design/log-rotation.md` for the rotation algorithm.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuditConfig {
     /// Whether audit logging is enabled.
     #[serde(default)]
     pub enabled: bool,
 
-    /// Output destination: file path or "stderr".
+    /// Output destination: directory path for date-chunked files, or "stderr".
+    /// When a directory, files are named `audit-YYYY-MM-DD.jsonl`.
     #[serde(default = "default_audit_output")]
     pub output: String,
+
+    /// Maximum total size across all log files in bytes (default: 10 MB).
+    #[serde(default = "default_max_total_bytes")]
+    pub max_total_bytes: u64,
+
+    /// Maximum size per individual log file in bytes (default: 5 MB).
+    #[serde(default = "default_max_file_bytes")]
+    pub max_file_bytes: u64,
 }
 
 impl Default for AuditConfig {
@@ -59,12 +71,22 @@ impl Default for AuditConfig {
         Self {
             enabled: false,
             output: default_audit_output(),
+            max_total_bytes: default_max_total_bytes(),
+            max_file_bytes: default_max_file_bytes(),
         }
     }
 }
 
 fn default_audit_output() -> String {
     "stderr".to_string()
+}
+
+fn default_max_total_bytes() -> u64 {
+    10 * 1024 * 1024 // 10 MB
+}
+
+fn default_max_file_bytes() -> u64 {
+    5 * 1024 * 1024 // 5 MB
 }
 
 /// Quorum rules for vote aggregation.
