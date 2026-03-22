@@ -1,0 +1,9 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "rm -rf /",
+    "description": "Delete everything"
+  },
+  "hook_event": "PreToolUse",
+  "session_id": "test-session-003"
+}

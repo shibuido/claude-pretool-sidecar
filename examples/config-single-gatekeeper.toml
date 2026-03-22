@@ -1,0 +1,18 @@
+# Example: Single gatekeeper configuration
+#
+# One provider makes all decisions. It must explicitly allow each tool call.
+# Errors are treated as deny (fail-secure).
+
+[quorum]
+min_allow = 1
+max_deny = 0
+error_policy = "deny"
+
+[timeout]
+provider_default = 10000
+
+[[providers]]
+name = "policy-checker"
+command = "/usr/local/bin/my-policy-checker"
+args = ["--config", "/etc/claude-policy.yaml"]
+mode = "vote"

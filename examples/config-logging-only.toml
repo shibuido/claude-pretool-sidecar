@@ -1,0 +1,14 @@
+# Example: Logging-only configuration
+#
+# This setup only logs tool requests without making any decisions.
+# All tool calls pass through to Claude Code's normal approval flow.
+
+[quorum]
+min_allow = 0
+default_decision = "passthrough"
+
+[[providers]]
+name = "file-logger"
+command = "claude-pretool-logger"
+args = ["--output", "/tmp/claude-tool-requests.jsonl"]
+mode = "fyi"

@@ -1,0 +1,37 @@
+# Example: Multi-provider configuration with logging
+#
+# Three voting providers with a quorum of 2 allows, 0 denies tolerated.
+# Plus a logging provider that records all requests.
+
+[quorum]
+min_allow = 2
+max_deny = 0
+error_policy = "passthrough"
+default_decision = "passthrough"
+
+[timeout]
+provider_default = 5000
+total = 20000
+
+[[providers]]
+name = "security-scanner"
+command = "./scripts/security-scan.sh"
+mode = "vote"
+timeout = 8000
+
+[[providers]]
+name = "team-policy"
+command = "python3"
+args = ["/opt/claude-policies/team-check.py"]
+mode = "vote"
+
+[[providers]]
+name = "user-rules"
+command = "./my-rules.sh"
+mode = "vote"
+
+[[providers]]
+name = "audit-log"
+command = "claude-pretool-logger"
+args = ["--output", "/var/log/claude-audit.jsonl"]
+mode = "fyi"
