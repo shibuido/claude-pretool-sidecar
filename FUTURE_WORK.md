@@ -1,49 +1,47 @@
 # Future Work — claude-pretool-sidecar
 
-*Last updated: 2026-03-22*
+*Last updated: 2026-03-24*
 
-## Phase 2: Plugin & Skills
+## Phase 2: Claude Code Plugin & Skills
 
-* [ ] Design and build Claude Code Plugin (`plugin.json`, hooks, skills, resources)
+* [ ] Design and create plugin structure (.claude-plugin/plugin.json, hooks/hooks.json)
 * [ ] Plugin auto-installs PreToolUse/PostToolUse hooks when activated
-* [ ] Skills for config management (find, validate, modify sidecar config)
-* [ ] Skills for troubleshooting (diagnose broken config, suggest fixes)
-* [ ] Skills for issue filing (`gh issue create` against this repo)
-* [ ] Bundled resources (config schema reference, examples, troubleshooting guide)
-* [ ] Plugin validation and testing
+* [ ] Skill: configure-sidecar — find, create, validate, modify config files
+* [ ] Skill: diagnose-sidecar — troubleshoot config/provider/hook issues
+* [ ] Skill: file-issue — formulate and file GitHub issues via `gh` CLI
+* [ ] Bundle resources: config schema, example configs, troubleshooting guide
+* [ ] Plugin validation and testing with --plugin-dir
 
 ## Phase 3: PostToolUse Integration
 
-* [ ] PostToolUse hook companion — correlates pre-tool requests with actual executions
-* [ ] Audit trail: which tools were requested, which were approved, which actually ran
-* [ ] Analytics/summary output (session summary of tool usage)
+* [ ] --post-tool CLI flag for PostToolUse audit-only mode
+* [ ] Correlate PostToolUse with PreToolUse logs (session_id + tool_use_id)
+* [ ] Audit trail: which tools requested → approved → actually ran
+* [ ] Session summary analytics output (tool usage report)
 
 ## Phase 4: Advanced Voting & Providers
 
-* [ ] Async provider support (providers that need more time)
-* [ ] Provider timeout configuration (per-provider)
+* [ ] Provider caching layer (same tool+input = cached decision within TTL)
 * [ ] Provider priority/weight system
-* [ ] Caching layer (same tool+input = cached decision within TTL)
-* [ ] Provider health monitoring
+* [ ] Provider health monitoring (error rate tracking, auto-disable)
+* [ ] Async provider support (providers that need more time)
 
 ## Phase 5: MCP Permission Tool Integration
 
-* [ ] Research if `--permission-tool` MCP flag exists or is planned
-* [ ] If available: build MCP server wrapper around sidecar
-* [ ] Alternative integration path for users who prefer MCP over hooks
+* [ ] Investigate --permission-prompt-tool as alternative integration path
+* [ ] Build MCP server wrapper around sidecar (if viable)
 
 ## Phase 6: Ecosystem & Distribution
 
-* [ ] Companion tools collection (additional composable scripts/binaries)
-* [ ] Example provider scripts (bash, python, node examples)
-* [ ] Packaging (cargo install, AUR, brew, nix)
-* [ ] Integration with shibuido super-repository (git submodule)
-* [ ] Documentation site or comprehensive README
+* [ ] Example provider scripts (bash, python, node)
+* [ ] Packaging: cargo install (crates.io), AUR, brew formula
+* [ ] Integration with shibuido super-repository (git submodule + symlinks)
+* [ ] Comprehensive README.md with quick start, examples, architecture
 
 ## Ideas / Parking Lot
 
-* Web dashboard for real-time tool approval monitoring
-* Notification integration (desktop notifications for pending approvals)
 * Rule-based auto-approval engine (regex patterns for tool+input matching)
+* Desktop notifications for pending approvals (notify-send/osascript)
+* Web dashboard for real-time tool approval monitoring
 * Multi-session coordination (shared state across Claude Code sessions)
 * Rate limiting per tool type
