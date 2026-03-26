@@ -13,20 +13,68 @@
 //! 6. It returns the final decision (JSON) on stdout to Claude Code
 //! 7. It writes an audit log entry with per-provider details
 //!
+//! ## CLI Flags
+//!
+//! - `--config <path>` — explicit config file path (highest priority)
+//! - `--validate` — validate config and exit
+//! - `--post-tool` — PostToolUse mode: audit-log only, output `{}`
+//! - `--passthrough` — return passthrough when no config file found
+//! - `--version` — show version
+//!
 //! See `docs/design/` for detailed design documents.
 
 mod audit;
+mod cli;
 mod config;
 mod hook;
 mod provider;
 mod quorum;
 
+use clap::Parser;
 use std::io::{self, Read};
 use std::process;
 use std::time::Instant;
 
 fn main() {
+    let cli = cli::Cli::parse();
     let start = Instant::now();
+
+    // Load configuration (--config flag has highest priority)
+    let config = match config::Config::load(cli.config.as_deref()) {
+        Ok(cfg) => cfg,
+        Err(config::ConfigError::NotFound) if cli.passthrough => {
+            // --passthrough: use empty config instead of erroring
+            config::Config::empty()
+        }
+        Err(e) => {
+            eprintln!("claude-pretool-sidecar: config error: {e}");
+            process::exit(1);
+        }
+    };
+
+    // --validate: check config and exit
+    if cli.validate {
+        let result = config.validate();
+
+        for warning in &result.warnings {
+            eprintln!("warning: {warning}");
+        }
+        for error in &result.errors {
+            eprintln!("error: {error}");
+        }
+
+        if result.is_ok() {
+            if result.warnings.is_empty() {
+                eprintln!("config valid");
+            } else {
+                eprintln!("config valid (with warnings)");
+            }
+            process::exit(0);
+        } else {
+            eprintln!("config invalid");
+            process::exit(1);
+        }
+    }
 
     // Read hook payload from stdin
     let mut input = String::new();
@@ -44,14 +92,19 @@ fn main() {
         }
     };
 
-    // Load configuration
-    let config = match config::Config::load() {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("claude-pretool-sidecar: config error: {e}");
-            process::exit(1);
-        }
-    };
+    // --post-tool: audit-log only, skip provider voting, output passthrough
+    if cli.post_tool {
+        let total_time_ms = start.elapsed().as_millis() as u64;
+        audit::log_decision(
+            &config.audit,
+            &hook_event,
+            &[],
+            hook::Decision::Passthrough,
+            total_time_ms,
+        );
+        println!("{{}}");
+        return;
+    }
 
     // Execute providers and collect detailed results
     let results = provider::execute_all(&config.providers, &hook_event, &config.timeout);

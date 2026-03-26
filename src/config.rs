@@ -193,16 +193,37 @@ fn default_mode() -> ProviderMode {
     ProviderMode::Vote
 }
 
+/// Result of a config validation check.
+#[derive(Debug)]
+pub struct ValidationResult {
+    /// Warning messages (non-fatal issues).
+    pub warnings: Vec<String>,
+    /// Error messages (fatal issues).
+    pub errors: Vec<String>,
+}
+
+impl ValidationResult {
+    /// Returns true if validation passed (no errors).
+    pub fn is_ok(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
 impl Config {
     /// Load configuration from the first available source.
     ///
     /// Search order:
-    /// 1. `--config <path>` CLI flag (TODO: CLI arg parsing)
+    /// 1. `explicit_path` from `--config <path>` CLI flag (highest priority)
     /// 2. `$CLAUDE_PRETOOL_SIDECAR_CONFIG` environment variable
     /// 3. `.claude-pretool-sidecar.toml` in current directory
     /// 4. `~/.config/claude-pretool-sidecar/config.toml` (XDG)
     /// 5. `~/.claude-pretool-sidecar.toml` (home fallback)
-    pub fn load() -> Result<Self, ConfigError> {
+    pub fn load(explicit_path: Option<&std::path::Path>) -> Result<Self, ConfigError> {
+        // Try explicit CLI path first (highest priority)
+        if let Some(path) = explicit_path {
+            return Self::load_from(&path.to_path_buf());
+        }
+
         // Try environment variable
         if let Ok(path) = std::env::var("CLAUDE_PRETOOL_SIDECAR_CONFIG") {
             let path = PathBuf::from(path);
@@ -248,6 +269,93 @@ impl Config {
             })?;
 
         Ok(config)
+    }
+
+    /// Returns a default empty config (no providers, passthrough defaults).
+    ///
+    /// Used when `--passthrough` flag is set and no config file is found.
+    pub fn empty() -> Self {
+        Config {
+            quorum: QuorumConfig::default(),
+            timeout: TimeoutConfig::default(),
+            providers: Vec::new(),
+            audit: AuditConfig::default(),
+        }
+    }
+
+    /// Validate the loaded configuration for potential issues.
+    ///
+    /// Checks:
+    /// - Provider command paths exist and are executable (warning if not)
+    /// - Quorum min_allow doesn't exceed number of vote-mode providers (warning)
+    pub fn validate(&self) -> ValidationResult {
+        let mut warnings = Vec::new();
+        let mut errors = Vec::new();
+
+        // Count vote-mode providers
+        let vote_provider_count = self
+            .providers
+            .iter()
+            .filter(|p| p.mode == ProviderMode::Vote)
+            .count() as u32;
+
+        // Check if min_allow exceeds vote provider count
+        if vote_provider_count > 0 && self.quorum.min_allow > vote_provider_count {
+            warnings.push(format!(
+                "quorum.min_allow ({}) exceeds number of vote-mode providers ({}); quorum can never be met",
+                self.quorum.min_allow, vote_provider_count
+            ));
+        }
+
+        // Check if min_allow > 0 but no vote providers exist
+        if vote_provider_count == 0 && self.quorum.min_allow > 0 {
+            warnings.push(format!(
+                "quorum.min_allow is {} but no vote-mode providers are configured; quorum can never be met",
+                self.quorum.min_allow
+            ));
+        }
+
+        // Check provider commands
+        for provider in &self.providers {
+            let cmd_path = std::path::Path::new(&provider.command);
+
+            // Only check absolute paths — relative/bare commands might be in PATH at runtime
+            if cmd_path.is_absolute() {
+                if !cmd_path.exists() {
+                    warnings.push(format!(
+                        "provider '{}': command '{}' does not exist",
+                        provider.name, provider.command
+                    ));
+                } else {
+                    // Check executable permission on Unix
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(meta) = std::fs::metadata(cmd_path) {
+                            if meta.permissions().mode() & 0o111 == 0 {
+                                warnings.push(format!(
+                                    "provider '{}': command '{}' exists but is not executable",
+                                    provider.name, provider.command
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for duplicate provider names
+        let mut seen_names = std::collections::HashSet::new();
+        for provider in &self.providers {
+            if !seen_names.insert(&provider.name) {
+                errors.push(format!(
+                    "duplicate provider name '{}'",
+                    provider.name
+                ));
+            }
+        }
+
+        ValidationResult { warnings, errors }
     }
 }
 
@@ -347,5 +455,215 @@ mod tests {
         "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.providers[0].mode, ProviderMode::Fyi);
+    }
+
+    /// # Config Loading Tests
+
+    /// Load with explicit path should use that path.
+    #[test]
+    fn load_with_explicit_path_uses_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test-config.toml");
+        std::fs::write(
+            &path,
+            r#"
+            [[providers]]
+            name = "test"
+            command = "echo"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&path)).unwrap();
+        assert_eq!(config.providers.len(), 1);
+        assert_eq!(config.providers[0].name, "test");
+    }
+
+    /// Load with None path should fall through to discovery.
+    #[test]
+    fn load_with_none_path_falls_through() {
+        // Unset env var to avoid interference, use a temp dir as HOME
+        // where no config exists
+        let dir = tempfile::TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+            std::env::remove_var("CLAUDE_PRETOOL_SIDECAR_CONFIG");
+        }
+
+        let result = Config::load(None);
+        assert!(matches!(result, Err(ConfigError::NotFound)));
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+    }
+
+    /// Empty config should have zero providers and default quorum.
+    #[test]
+    fn empty_config_has_defaults() {
+        let config = Config::empty();
+        assert_eq!(config.providers.len(), 0);
+        assert_eq!(config.quorum.min_allow, 1);
+        assert_eq!(config.quorum.max_deny, 0);
+    }
+
+    /// # Config Validation Tests
+    ///
+    /// These tests verify that the validate() method correctly identifies
+    /// potential issues in the configuration.
+
+    /// Valid config with matching quorum and providers passes validation.
+    #[test]
+    fn validate_valid_config_passes() {
+        let config = Config {
+            quorum: QuorumConfig {
+                min_allow: 1,
+                max_deny: 0,
+                error_policy: Decision::Passthrough,
+                default_decision: Decision::Passthrough,
+            },
+            timeout: TimeoutConfig::default(),
+            providers: vec![ProviderConfig {
+                name: "checker".to_string(),
+                command: "echo".to_string(),
+                args: vec![],
+                mode: ProviderMode::Vote,
+                timeout: None,
+                env: std::collections::HashMap::new(),
+            }],
+            audit: AuditConfig::default(),
+        };
+
+        let result = config.validate();
+        assert!(result.is_ok());
+        assert!(result.warnings.is_empty());
+    }
+
+    /// min_allow exceeding vote provider count should produce a warning.
+    #[test]
+    fn validate_min_allow_exceeds_providers_warns() {
+        let config = Config {
+            quorum: QuorumConfig {
+                min_allow: 3,
+                max_deny: 0,
+                error_policy: Decision::Passthrough,
+                default_decision: Decision::Passthrough,
+            },
+            timeout: TimeoutConfig::default(),
+            providers: vec![ProviderConfig {
+                name: "checker".to_string(),
+                command: "echo".to_string(),
+                args: vec![],
+                mode: ProviderMode::Vote,
+                timeout: None,
+                env: std::collections::HashMap::new(),
+            }],
+            audit: AuditConfig::default(),
+        };
+
+        let result = config.validate();
+        assert!(result.is_ok()); // warnings, not errors
+        assert!(result.warnings.iter().any(|w| w.contains("min_allow (3) exceeds")));
+    }
+
+    /// min_allow > 0 with only fyi providers should warn.
+    #[test]
+    fn validate_no_vote_providers_with_min_allow_warns() {
+        let config = Config {
+            quorum: QuorumConfig {
+                min_allow: 1,
+                max_deny: 0,
+                error_policy: Decision::Passthrough,
+                default_decision: Decision::Passthrough,
+            },
+            timeout: TimeoutConfig::default(),
+            providers: vec![ProviderConfig {
+                name: "logger".to_string(),
+                command: "echo".to_string(),
+                args: vec![],
+                mode: ProviderMode::Fyi,
+                timeout: None,
+                env: std::collections::HashMap::new(),
+            }],
+            audit: AuditConfig::default(),
+        };
+
+        let result = config.validate();
+        assert!(result.warnings.iter().any(|w| w.contains("no vote-mode providers")));
+    }
+
+    /// Non-existent absolute command path should produce a warning.
+    #[test]
+    fn validate_nonexistent_command_warns() {
+        let config = Config {
+            quorum: QuorumConfig::default(),
+            timeout: TimeoutConfig::default(),
+            providers: vec![ProviderConfig {
+                name: "ghost".to_string(),
+                command: "/nonexistent/path/to/binary".to_string(),
+                args: vec![],
+                mode: ProviderMode::Vote,
+                timeout: None,
+                env: std::collections::HashMap::new(),
+            }],
+            audit: AuditConfig::default(),
+        };
+
+        let result = config.validate();
+        assert!(result.warnings.iter().any(|w| w.contains("does not exist")));
+    }
+
+    /// Bare command names (not absolute paths) should not produce warnings.
+    #[test]
+    fn validate_bare_command_no_warning() {
+        let config = Config {
+            quorum: QuorumConfig::default(),
+            timeout: TimeoutConfig::default(),
+            providers: vec![ProviderConfig {
+                name: "checker".to_string(),
+                command: "echo".to_string(),
+                args: vec![],
+                mode: ProviderMode::Vote,
+                timeout: None,
+                env: std::collections::HashMap::new(),
+            }],
+            audit: AuditConfig::default(),
+        };
+
+        let result = config.validate();
+        assert!(result.warnings.is_empty());
+    }
+
+    /// Duplicate provider names should produce an error.
+    #[test]
+    fn validate_duplicate_provider_names_errors() {
+        let config = Config {
+            quorum: QuorumConfig::default(),
+            timeout: TimeoutConfig::default(),
+            providers: vec![
+                ProviderConfig {
+                    name: "checker".to_string(),
+                    command: "echo".to_string(),
+                    args: vec![],
+                    mode: ProviderMode::Vote,
+                    timeout: None,
+                    env: std::collections::HashMap::new(),
+                },
+                ProviderConfig {
+                    name: "checker".to_string(),
+                    command: "true".to_string(),
+                    args: vec![],
+                    mode: ProviderMode::Vote,
+                    timeout: None,
+                    env: std::collections::HashMap::new(),
+                },
+            ],
+            audit: AuditConfig::default(),
+        };
+
+        let result = config.validate();
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| e.contains("duplicate provider name")));
     }
 }

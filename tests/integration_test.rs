@@ -13,6 +13,7 @@
 //! a hook payload on stdin.
 
 use assert_cmd::Command;
+use predicates::prelude::*;
 use std::fs;
 use tempfile::NamedTempFile;
 
@@ -269,4 +270,224 @@ fn bad_json_provider_treated_as_error() {
     // Passthrough = empty object, no hookSpecificOutput
     assert_eq!(extract_decision(&response), None);
     assert_eq!(response, serde_json::json!({}));
+}
+
+/// # CLI: --config flag
+///
+/// When --config is provided, it should use that config file
+/// instead of environment variable or file discovery.
+#[test]
+fn cli_config_flag_overrides_env() {
+    let allow_config = format!(
+        r#"
+        [quorum]
+        min_allow = 1
+
+        [[providers]]
+        name = "allower"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let deny_config = format!(
+        r#"
+        [quorum]
+        min_allow = 1
+
+        [[providers]]
+        name = "denier"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-deny.sh").display()
+    );
+
+    let allow_file = write_temp_config(&allow_config);
+    let deny_file = write_temp_config(&deny_config);
+    let payload = read_payload("hook-bash-payload.json");
+
+    // --config should take priority over env var
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--config", &allow_file.path().to_string_lossy()])
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", deny_file.path())
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // --config pointed to allow config, so should be allow (not deny from env)
+    assert_eq!(extract_decision(&response), Some("allow"));
+}
+
+/// # CLI: --validate with valid config
+///
+/// When --validate is set with a valid config, it should exit 0
+/// and print "config valid" to stderr.
+#[test]
+fn cli_validate_valid_config_exits_zero() {
+    let config = format!(
+        r#"
+        [quorum]
+        min_allow = 1
+
+        [[providers]]
+        name = "checker"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let config_file = write_temp_config(&config);
+
+    Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--validate", "--config", &config_file.path().to_string_lossy()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("config valid"));
+}
+
+/// # CLI: --validate with warnings
+///
+/// When min_allow exceeds vote provider count, --validate should still
+/// exit 0 but show a warning.
+#[test]
+fn cli_validate_with_warnings_exits_zero() {
+    let config = r#"
+        [quorum]
+        min_allow = 5
+
+        [[providers]]
+        name = "checker"
+        command = "echo"
+        mode = "vote"
+    "#;
+    let config_file = write_temp_config(config);
+
+    Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--validate", "--config", &config_file.path().to_string_lossy()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("warning"))
+        .stderr(predicate::str::contains("min_allow"));
+}
+
+/// # CLI: --validate with errors
+///
+/// When config has duplicate provider names, --validate should exit 1.
+#[test]
+fn cli_validate_with_errors_exits_one() {
+    let config = r#"
+        [[providers]]
+        name = "checker"
+        command = "echo"
+
+        [[providers]]
+        name = "checker"
+        command = "true"
+    "#;
+    let config_file = write_temp_config(config);
+
+    Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--validate", "--config", &config_file.path().to_string_lossy()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate provider name"));
+}
+
+/// # CLI: --post-tool outputs passthrough
+///
+/// When --post-tool is set, the sidecar should skip provider voting
+/// and output `{}` (passthrough).
+#[test]
+fn cli_post_tool_outputs_passthrough() {
+    let config = format!(
+        r#"
+        [[providers]]
+        name = "denier"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-deny.sh").display()
+    );
+    let config_file = write_temp_config(&config);
+    let payload = read_payload("hook-bash-payload.json");
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--post-tool", "--config", &config_file.path().to_string_lossy()])
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "{}");
+}
+
+/// # CLI: --passthrough when no config found
+///
+/// When --passthrough is set and no config file exists, the sidecar
+/// should use an empty config and output passthrough instead of erroring.
+#[test]
+fn cli_passthrough_no_config_outputs_passthrough() {
+    let payload = read_payload("hook-bash-payload.json");
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--passthrough"])
+        // Point HOME and config away from any real config files
+        .env("HOME", tmp.path())
+        .env_remove("CLAUDE_PRETOOL_SIDECAR_CONFIG")
+        .env_remove("XDG_CONFIG_HOME")
+        .current_dir(tmp.path())
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // Empty config with default quorum (min_allow=1, 0 providers) → default_decision = passthrough
+    assert_eq!(response, serde_json::json!({}));
+}
+
+/// # CLI: no --passthrough and no config errors out
+///
+/// Without --passthrough flag, a missing config should cause exit 1.
+#[test]
+fn cli_no_passthrough_no_config_errors() {
+    let payload = read_payload("hook-bash-payload.json");
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .env_remove("CLAUDE_PRETOOL_SIDECAR_CONFIG")
+        .env_remove("XDG_CONFIG_HOME")
+        .current_dir(tmp.path())
+        .write_stdin(payload)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("config error"));
+}
+
+/// # CLI: --version shows version
+///
+/// The --version flag should output the version from Cargo.toml.
+#[test]
+fn cli_version_shows_version() {
+    Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
