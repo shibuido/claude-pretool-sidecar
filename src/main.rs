@@ -130,11 +130,11 @@ fn main() {
             let results =
                 provider::execute_all(&config.providers, &hook_event, &config.timeout);
 
-            // Extract votes from non-FYI providers for quorum aggregation
-            let votes = provider::votes_from_results(&results);
+            // Extract weighted votes from non-FYI providers for quorum aggregation
+            let votes = provider::weighted_votes_from_results(&results);
 
-            // Aggregate votes using quorum rules
-            let decision = quorum::aggregate(&config.quorum, &votes);
+            // Aggregate weighted votes using quorum rules
+            let decision = quorum::aggregate_weighted(&config.quorum, &votes);
 
             // Store in cache for future identical calls
             decision_cache.put(&hook_event.tool_name, &hook_event.tool_input, decision);

@@ -77,6 +77,80 @@ default_decision = "passthrough"
 ```
 No voting providers. All providers are FYI. Always passthrough.
 
+## Weighted Voting
+
+Providers can have configurable weights that affect how their votes are counted in quorum aggregation. By default, each provider has a weight of 1.
+
+### Configuration
+
+```toml
+[[providers]]
+name = "security-checker"
+command = "/usr/bin/sec-check"
+mode = "vote"
+weight = 2    # This provider's vote counts double
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `weight` | u32 | 1 | How much this provider's vote counts in quorum |
+
+* Weight is only meaningful for `vote`-mode providers; it is ignored for `fyi` providers.
+* Weight defaults to 1, preserving full backward compatibility with existing configs.
+
+### How Weights Affect the Algorithm
+
+Instead of counting each vote as 1, each vote contributes its provider's weight:
+
+```
+1. Collect weighted votes from all non-FYI providers
+2. For each vote:
+   - allow → allow_count += weight
+   - deny  → deny_count  += weight
+   - passthrough → passthrough_count += weight
+   - error → apply error_policy, then add weight to the resulting category
+3. IF deny_count > max_deny → DENY
+4. IF allow_count >= min_allow → ALLOW
+5. ELSE → default_decision
+```
+
+### Examples
+
+#### Example: Security checker with double weight
+
+```toml
+[quorum]
+min_allow = 2
+max_deny = 0
+
+[[providers]]
+name = "security-checker"
+command = "/usr/bin/sec-check"
+weight = 2
+
+[[providers]]
+name = "style-checker"
+command = "/usr/bin/style-check"
+weight = 1
+```
+
+If only `security-checker` votes allow, its weight of 2 satisfies `min_allow = 2` on its own.
+
+#### Example: Heavy deny overrides tolerance
+
+```toml
+[quorum]
+min_allow = 1
+max_deny = 1
+
+[[providers]]
+name = "critical-scanner"
+command = "/usr/bin/critical-scan"
+weight = 2
+```
+
+If `critical-scanner` votes deny, its weighted deny count of 2 exceeds `max_deny = 1`, causing an overall deny even though only one provider denied.
+
 ## Edge Cases
 
 * **Zero non-FYI providers**: Returns `default_decision` immediately

@@ -365,6 +365,7 @@ mod tests {
                 name: "checker".to_string(),
                 vote: Vote::Allow,
                 mode: "vote".to_string(),
+                weight: 1,
                 response_time_ms: 45,
                 reason: None,
                 error: None,

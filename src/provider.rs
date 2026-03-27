@@ -32,6 +32,8 @@ pub struct ProviderResult {
     pub vote: Vote,
     /// Provider mode (vote or fyi)
     pub mode: String,
+    /// Vote weight from config (default 1, ignored for FYI providers)
+    pub weight: u32,
     /// How long the provider took to respond (milliseconds)
     pub response_time_ms: u64,
     /// Optional reason from the provider
@@ -77,12 +79,31 @@ pub fn execute_all(
     results
 }
 
+/// A vote paired with its provider's weight for weighted quorum aggregation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeightedVote {
+    pub vote: Vote,
+    pub weight: u32,
+}
+
 /// Extract only the votes from non-FYI providers (for quorum aggregation).
 pub fn votes_from_results(results: &[ProviderResult]) -> Vec<Vote> {
     results
         .iter()
         .filter(|r| r.mode == "vote")
         .map(|r| r.vote.clone())
+        .collect()
+}
+
+/// Extract weighted votes from non-FYI providers (for weighted quorum aggregation).
+pub fn weighted_votes_from_results(results: &[ProviderResult]) -> Vec<WeightedVote> {
+    results
+        .iter()
+        .filter(|r| r.mode == "vote")
+        .map(|r| WeightedVote {
+            vote: r.vote.clone(),
+            weight: r.weight,
+        })
         .collect()
 }
 
@@ -116,6 +137,7 @@ fn execute_one(
                 name: provider.name.clone(),
                 vote: Vote::Error,
                 mode: mode.to_string(),
+                weight: provider.weight,
                 response_time_ms: elapsed.as_millis() as u64,
                 reason: None,
                 error: Some(format!("failed to spawn: {e}")),
@@ -132,6 +154,7 @@ fn execute_one(
                 name: provider.name.clone(),
                 vote: Vote::Error,
                 mode: mode.to_string(),
+                weight: provider.weight,
                 response_time_ms: elapsed.as_millis() as u64,
                 reason: None,
                 error: Some(format!("failed to write stdin: {e}")),
@@ -153,6 +176,7 @@ fn execute_one(
                 name: provider.name.clone(),
                 vote: Vote::Error,
                 mode: mode.to_string(),
+                weight: provider.weight,
                 response_time_ms: elapsed.as_millis() as u64,
                 reason: None,
                 error: Some(format!(
@@ -167,6 +191,7 @@ fn execute_one(
                 name: provider.name.clone(),
                 vote: Vote::Error,
                 mode: mode.to_string(),
+                weight: provider.weight,
                 response_time_ms: elapsed.as_millis() as u64,
                 reason: None,
                 error: Some(format!("wait failed: {e}")),
@@ -182,6 +207,7 @@ fn execute_one(
             name: provider.name.clone(),
             vote: Vote::Error,
             mode: mode.to_string(),
+            weight: provider.weight,
             response_time_ms: elapsed.as_millis() as u64,
             reason: None,
             error: Some(format!("exited with status {}", status)),
@@ -201,6 +227,7 @@ fn execute_one(
                         name: provider.name.clone(),
                         vote: Vote::Error,
                         mode: mode.to_string(),
+                        weight: provider.weight,
                         response_time_ms: elapsed.as_millis() as u64,
                         reason: None,
                         error: Some(format!("failed to read stdout: {e}")),
@@ -217,6 +244,7 @@ fn execute_one(
         name: provider.name.clone(),
         vote,
         mode: mode.to_string(),
+        weight: provider.weight,
         response_time_ms: elapsed.as_millis() as u64,
         reason,
         error,
@@ -328,6 +356,7 @@ mod tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             mode: ProviderMode::Vote,
             timeout: timeout_ms,
+            weight: 1,
             env: std::collections::HashMap::new(),
         }
     }

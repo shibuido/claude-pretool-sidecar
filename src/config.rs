@@ -215,9 +215,18 @@ pub struct ProviderConfig {
     /// Per-provider timeout override (milliseconds).
     pub timeout: Option<u64>,
 
+    /// Vote weight for quorum aggregation (default: 1).
+    /// Only meaningful for vote-mode providers; ignored for FYI providers.
+    #[serde(default = "default_weight")]
+    pub weight: u32,
+
     /// Additional environment variables.
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+}
+
+fn default_weight() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -633,6 +642,7 @@ mod tests {
                 args: vec![],
                 mode: ProviderMode::Vote,
                 timeout: None,
+                weight: 1,
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
@@ -661,6 +671,7 @@ mod tests {
                 args: vec![],
                 mode: ProviderMode::Vote,
                 timeout: None,
+                weight: 1,
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
@@ -689,6 +700,7 @@ mod tests {
                 args: vec![],
                 mode: ProviderMode::Fyi,
                 timeout: None,
+                weight: 1,
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
@@ -711,6 +723,7 @@ mod tests {
                 args: vec![],
                 mode: ProviderMode::Vote,
                 timeout: None,
+                weight: 1,
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
@@ -733,6 +746,7 @@ mod tests {
                 args: vec![],
                 mode: ProviderMode::Vote,
                 timeout: None,
+                weight: 1,
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
@@ -816,6 +830,32 @@ mod tests {
         assert_eq!(config.timeout.provider_default, 15000);
     }
 
+    /// Weight field should be parsed from TOML config.
+    #[test]
+    fn parse_weight_from_config() {
+        let toml = r#"
+            [[providers]]
+            name = "security"
+            command = "/usr/bin/sec-check"
+            mode = "vote"
+            weight = 3
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.providers[0].weight, 3);
+    }
+
+    /// Weight should default to 1 when not specified.
+    #[test]
+    fn parse_weight_defaults_to_one() {
+        let toml = r#"
+            [[providers]]
+            name = "checker"
+            command = "/usr/bin/check"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.providers[0].weight, 1);
+    }
+
     /// Duplicate provider names should produce an error.
     #[test]
     fn validate_duplicate_provider_names_errors() {
@@ -829,6 +869,7 @@ mod tests {
                     args: vec![],
                     mode: ProviderMode::Vote,
                     timeout: None,
+                    weight: 1,
                     env: std::collections::HashMap::new(),
                 },
                 ProviderConfig {
@@ -837,6 +878,7 @@ mod tests {
                     args: vec![],
                     mode: ProviderMode::Vote,
                     timeout: None,
+                    weight: 1,
                     env: std::collections::HashMap::new(),
                 },
             ],
