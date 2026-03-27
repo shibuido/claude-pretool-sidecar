@@ -252,7 +252,9 @@ pub struct TimeoutConfig {
     pub provider_default: u64,
 
     /// Total timeout for all providers combined in milliseconds.
+    /// Reserved for future use (individual provider timeouts are enforced).
     #[serde(default = "default_total_timeout")]
+    #[allow(dead_code)]
     pub total: u64,
 }
 

@@ -18,6 +18,7 @@ use crate::provider::{Vote, WeightedVote};
 ///
 /// Each vote counts as weight 1. For weighted voting, use `aggregate_weighted`.
 /// See `docs/design/voting-quorum.md` for the full algorithm specification.
+#[allow(dead_code)] // Used in tests; main binary calls aggregate_weighted directly
 pub fn aggregate(config: &QuorumConfig, votes: &[Vote]) -> Decision {
     let weighted: Vec<WeightedVote> = votes
         .iter()

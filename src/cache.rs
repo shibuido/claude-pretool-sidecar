@@ -98,6 +98,7 @@ impl DecisionCache {
     }
 
     /// Flush the entire cache.
+    #[allow(dead_code)] // Public API, not called from main binary
     pub fn clear(&self) {
         let _ = std::fs::remove_file(&self.path);
     }

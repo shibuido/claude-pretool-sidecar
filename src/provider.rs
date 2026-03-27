@@ -87,6 +87,8 @@ pub struct WeightedVote {
 }
 
 /// Extract only the votes from non-FYI providers (for quorum aggregation).
+/// Superseded by `weighted_votes_from_results` in main binary, but kept as public API.
+#[allow(dead_code)]
 pub fn votes_from_results(results: &[ProviderResult]) -> Vec<Vote> {
     results
         .iter()
