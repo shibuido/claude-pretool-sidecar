@@ -163,6 +163,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "wait-timeout",
 ]
 
 [[package]]
