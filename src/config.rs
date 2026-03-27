@@ -43,6 +43,9 @@ pub struct Config {
 
     #[serde(default)]
     pub cache: CacheConfig,
+
+    #[serde(default)]
+    pub health: HealthConfig,
 }
 
 /// Audit logging configuration.
@@ -125,6 +128,50 @@ impl Default for CacheConfig {
 
 fn default_cache_ttl() -> u64 {
     60
+}
+
+/// Health monitoring configuration for provider error tracking.
+///
+/// When enabled, tracks provider error rates across invocations within
+/// a session and auto-disables consistently failing providers.
+///
+/// ```toml
+/// [health]
+/// enabled = false
+/// max_error_rate = 0.5
+/// min_calls_before_disable = 3
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct HealthConfig {
+    /// Whether health monitoring is enabled (opt-in, default false).
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Disable provider if its error rate exceeds this threshold (0.0 to 1.0).
+    #[serde(default = "default_max_error_rate")]
+    pub max_error_rate: f64,
+
+    /// Minimum number of calls before a provider can be disabled.
+    #[serde(default = "default_min_calls_before_disable")]
+    pub min_calls_before_disable: u32,
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_error_rate: default_max_error_rate(),
+            min_calls_before_disable: default_min_calls_before_disable(),
+        }
+    }
+}
+
+fn default_max_error_rate() -> f64 {
+    0.5
+}
+
+fn default_min_calls_before_disable() -> u32 {
+    3
 }
 
 /// Quorum rules for vote aggregation.
@@ -319,6 +366,7 @@ impl Config {
             providers: Vec::new(),
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         }
     }
 
@@ -637,6 +685,7 @@ mod tests {
             }],
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         };
 
         let result = config.validate();
@@ -665,6 +714,7 @@ mod tests {
             }],
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         };
 
         let result = config.validate();
@@ -693,6 +743,7 @@ mod tests {
             }],
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         };
 
         let result = config.validate();
@@ -715,6 +766,7 @@ mod tests {
             }],
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         };
 
         let result = config.validate();
@@ -737,6 +789,7 @@ mod tests {
             }],
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         };
 
         let result = config.validate();
@@ -842,6 +895,7 @@ mod tests {
             ],
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
+            health: HealthConfig::default(),
         };
 
         let result = config.validate();
