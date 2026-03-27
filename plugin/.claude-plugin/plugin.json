@@ -1,0 +1,8 @@
+{
+  "name": "claude-pretool-sidecar",
+  "version": "0.1.0",
+  "description": "Composable tool-approval sidecar with multi-provider voting",
+  "author": {"name": "shibuido"},
+  "repository": "https://github.com/shibuido/claude-pretool-sidecar",
+  "license": "MIT"
+}

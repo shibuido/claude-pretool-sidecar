@@ -1,0 +1,29 @@
+{
+  "description": "Routes tool approval through claude-pretool-sidecar",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-pretool-sidecar",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-pretool-sidecar --post-tool",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
