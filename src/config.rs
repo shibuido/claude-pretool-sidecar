@@ -46,6 +46,37 @@ pub struct Config {
 
     #[serde(default)]
     pub health: HealthConfig,
+
+    #[serde(default)]
+    pub rules: Vec<RuleConfig>,
+}
+
+/// Configuration for a single rule in the rules engine.
+///
+/// Rules are evaluated in order — first match wins.
+/// The `tool` field is a regex matched against `tool_name`.
+/// The `input` field (optional) is a regex matched against serialized `tool_input`.
+///
+/// ```toml
+/// [[rules]]
+/// tool = "Bash"
+/// input = "^ls |^pwd$"
+/// decision = "allow"
+/// reason = "Safe read-only commands"
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct RuleConfig {
+    /// Regex pattern matched against tool_name (e.g., "Bash", "Write|Edit", "*").
+    pub tool: String,
+
+    /// Optional regex pattern matched against serialized tool_input JSON.
+    pub input: Option<String>,
+
+    /// Decision to return when this rule matches: allow, deny, or passthrough.
+    pub decision: Decision,
+
+    /// Optional human-readable reason explaining the rule.
+    pub reason: Option<String>,
 }
 
 /// Audit logging configuration.
@@ -376,6 +407,7 @@ impl Config {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         }
     }
 
@@ -696,6 +728,7 @@ mod tests {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         };
 
         let result = config.validate();
@@ -726,6 +759,7 @@ mod tests {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         };
 
         let result = config.validate();
@@ -756,6 +790,7 @@ mod tests {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         };
 
         let result = config.validate();
@@ -780,6 +815,7 @@ mod tests {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         };
 
         let result = config.validate();
@@ -804,6 +840,7 @@ mod tests {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         };
 
         let result = config.validate();
@@ -938,10 +975,63 @@ mod tests {
             audit: AuditConfig::default(),
             cache: CacheConfig::default(),
             health: HealthConfig::default(),
+            rules: Vec::new(),
         };
 
         let result = config.validate();
         assert!(!result.is_ok());
         assert!(result.errors.iter().any(|e| e.contains("duplicate provider name")));
+    }
+
+    /// Rules should be parsed from TOML config.
+    #[test]
+    fn parse_rules_from_config() {
+        let toml = r#"
+            [[rules]]
+            tool = "Bash"
+            input = "^ls "
+            decision = "allow"
+            reason = "Safe command"
+
+            [[rules]]
+            tool = "Write|Edit"
+            decision = "deny"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.rules.len(), 2);
+        assert_eq!(config.rules[0].tool, "Bash");
+        assert_eq!(config.rules[0].input, Some("^ls ".to_string()));
+        assert_eq!(config.rules[0].decision, Decision::Allow);
+        assert_eq!(config.rules[0].reason, Some("Safe command".to_string()));
+        assert_eq!(config.rules[1].tool, "Write|Edit");
+        assert_eq!(config.rules[1].input, None);
+        assert_eq!(config.rules[1].decision, Decision::Deny);
+        assert!(config.rules[1].reason.is_none());
+    }
+
+    /// Config with no rules should default to empty list.
+    #[test]
+    fn parse_config_without_rules_defaults_to_empty() {
+        let toml = r#"
+            [[providers]]
+            name = "checker"
+            command = "echo"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.rules.is_empty());
+    }
+
+    /// Rules with passthrough decision should parse correctly.
+    #[test]
+    fn parse_rules_passthrough_decision() {
+        let toml = r#"
+            [[rules]]
+            tool = "*"
+            decision = "passthrough"
+            reason = "Catch-all passthrough"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.rules.len(), 1);
+        assert_eq!(config.rules[0].decision, Decision::Passthrough);
     }
 }

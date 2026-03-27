@@ -31,6 +31,7 @@ mod health;
 mod hook;
 mod provider;
 mod quorum;
+mod rules;
 
 use clap::Parser;
 use std::io::{self, Read};
@@ -110,6 +111,60 @@ fn main() {
         );
         println!("{{}}");
         return;
+    }
+
+    // Compile and evaluate rules engine (fast-path shortcut before providers)
+    if !config.rules.is_empty() {
+        match rules::RulesEngine::new(&config.rules) {
+            Ok(engine) => {
+                if let Some((decision, reason)) =
+                    engine.evaluate(&hook_event.tool_name, &hook_event.tool_input)
+                {
+                    let total_time_ms = start.elapsed().as_millis() as u64;
+
+                    // Create a synthetic provider result for audit logging
+                    let results = vec![provider::ProviderResult {
+                        name: "rules-engine".to_string(),
+                        vote: match decision {
+                            hook::Decision::Allow => provider::Vote::Allow,
+                            hook::Decision::Deny => provider::Vote::Deny,
+                            hook::Decision::Passthrough => provider::Vote::Passthrough,
+                        },
+                        mode: "vote".to_string(),
+                        weight: 1,
+                        response_time_ms: total_time_ms,
+                        reason: reason.clone(),
+                        error: None,
+                    }];
+
+                    // Audit-log the rules engine decision
+                    audit::log_decision(
+                        &config.audit,
+                        &hook_event,
+                        &results,
+                        decision,
+                        total_time_ms,
+                    );
+
+                    // Output decision and exit (skip providers entirely)
+                    let output = hook::HookResponse::from_decision(decision, reason);
+                    match serde_json::to_string(&output) {
+                        Ok(json) => println!("{json}"),
+                        Err(e) => {
+                            eprintln!(
+                                "claude-pretool-sidecar: failed to serialize response: {e}"
+                            );
+                            process::exit(1);
+                        }
+                    }
+                    return;
+                }
+            }
+            Err(e) => {
+                eprintln!("claude-pretool-sidecar: rules engine compile error: {e}");
+                // Fall through to normal provider execution
+            }
+        }
     }
 
     // Initialize cache (file-based, scoped per session)

@@ -1,0 +1,67 @@
+# Example: Rules-based auto-approval configuration
+#
+# The rules engine provides a fast-path shortcut for common policies.
+# Rules are evaluated in order — first match wins.
+# If no rule matches, the request falls through to provider voting.
+#
+# Each rule has:
+#   tool     = regex matched against tool_name (use "*" for any tool)
+#   input    = optional regex matched against serialized tool_input JSON
+#   decision = "allow", "deny", or "passthrough"
+#   reason   = optional explanation (shown in audit log and deny messages)
+
+# Allow safe read-only Bash commands without prompting
+[[rules]]
+tool = "Bash"
+input = "\"command\":\\s*\"(ls |pwd|echo |cat |head |tail |wc |date|whoami|uname)"
+decision = "allow"
+reason = "Safe read-only commands auto-approved"
+
+# Block dangerous Bash commands
+[[rules]]
+tool = "Bash"
+input = "rm -rf|dd if=|mkfs|chmod 777|:(){ :|:& };:"
+decision = "deny"
+reason = "Dangerous command blocked by rule"
+
+# Block writes to sensitive files
+[[rules]]
+tool = "Write|Edit"
+input = "\\.env|\\.credentials|secrets\\.ya?ml|id_rsa|\\.pem$"
+decision = "deny"
+reason = "Sensitive file write blocked by rule"
+
+# Allow reading any file (Read tool is always safe)
+[[rules]]
+tool = "Read"
+decision = "allow"
+reason = "Read-only access always permitted"
+
+# Allow Glob and Grep (search tools are safe)
+[[rules]]
+tool = "Glob|Grep"
+decision = "allow"
+reason = "Search tools auto-approved"
+
+# Everything else falls through to providers below
+# (if no rule matches, normal provider voting applies)
+
+[quorum]
+min_allow = 1
+max_deny = 0
+error_policy = "passthrough"
+default_decision = "passthrough"
+
+[timeout]
+provider_default = 5000
+
+# Providers are only invoked for tool calls not handled by rules
+[[providers]]
+name = "security-checker"
+command = "/usr/local/bin/my-security-checker"
+mode = "vote"
+
+[[providers]]
+name = "audit-logger"
+command = "claude-pretool-logger"
+mode = "fyi"
