@@ -75,6 +75,9 @@ run_suite "Provider Execution Tests"  "$SCRIPT_DIR/standalone-providers.sh"
 run_suite "Quorum Logic Tests"        "$SCRIPT_DIR/standalone-quorum.sh"
 run_suite "Audit Logging Tests"       "$SCRIPT_DIR/standalone-audit.sh"
 run_suite "Hook Format Compliance"    "$SCRIPT_DIR/standalone-hook-format.sh"
+run_suite "Plugin Structure"          "$SCRIPT_DIR/standalone-plugin-structure.sh"
+run_suite "Plugin Hook Configuration" "$SCRIPT_DIR/standalone-plugin-hooks.sh"
+run_suite "Plugin Scripts"            "$SCRIPT_DIR/standalone-plugin-scripts.sh"
 
 # Summary
 echo ""
