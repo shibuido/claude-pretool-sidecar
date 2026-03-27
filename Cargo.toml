@@ -27,6 +27,10 @@ path = "src/bin/analyzer.rs"
 name = "claude-pretool-notifier"
 path = "src/bin/notifier.rs"
 
+[[bin]]
+name = "claude-pretool-monitor"
+path = "src/bin/monitor.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -35,6 +39,9 @@ toml = "0.8"
 thiserror = "2"
 wait-timeout = "0.2"
 regex = "1"
+ratatui = "0.29"
+crossterm = "0.28"
+ctrlc = "3"
 
 [dev-dependencies]
 assert_cmd = "2"
