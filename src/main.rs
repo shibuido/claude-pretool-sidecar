@@ -156,6 +156,7 @@ fn main() {
                                     config::ProviderMode::Fyi => "fyi",
                                 }
                                 .to_string(),
+                                weight: p.weight,
                                 response_time_ms: 0,
                                 reason: None,
                                 error: Some(format!(
