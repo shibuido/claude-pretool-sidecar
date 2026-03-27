@@ -52,6 +52,10 @@ fn main() {
         }
     };
 
+    // Apply CPTS_* environment variable overrides
+    let mut config = config;
+    config.apply_env_overrides();
+
     // --validate: check config and exit
     if cli.validate {
         let result = config.validate();

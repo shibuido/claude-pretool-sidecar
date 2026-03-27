@@ -283,6 +283,70 @@ impl Config {
         }
     }
 
+    /// Apply environment variable overrides (CPTS_* prefix).
+    ///
+    /// Checks for `CPTS_MIN_ALLOW`, `CPTS_MAX_DENY`, `CPTS_ERROR_POLICY`,
+    /// and `CPTS_TIMEOUT` and overrides the corresponding config fields.
+    /// Invalid values print a warning to stderr and keep the config file value.
+    pub fn apply_env_overrides(&mut self) {
+        self.apply_env_overrides_from(
+            std::env::var("CPTS_MIN_ALLOW").ok(),
+            std::env::var("CPTS_MAX_DENY").ok(),
+            std::env::var("CPTS_ERROR_POLICY").ok(),
+            std::env::var("CPTS_TIMEOUT").ok(),
+        );
+    }
+
+    /// Apply environment variable overrides from explicit Option values.
+    ///
+    /// This is the testable core — accepts parsed env values as parameters
+    /// so unit tests don't need to mutate the process environment.
+    pub fn apply_env_overrides_from(
+        &mut self,
+        min_allow: Option<String>,
+        max_deny: Option<String>,
+        error_policy: Option<String>,
+        timeout: Option<String>,
+    ) {
+        if let Some(val) = min_allow {
+            match val.parse::<u32>() {
+                Ok(n) => self.quorum.min_allow = n,
+                Err(_) => eprintln!(
+                    "claude-pretool-sidecar: CPTS_MIN_ALLOW: expected integer, got '{val}'"
+                ),
+            }
+        }
+
+        if let Some(val) = max_deny {
+            match val.parse::<u32>() {
+                Ok(n) => self.quorum.max_deny = n,
+                Err(_) => eprintln!(
+                    "claude-pretool-sidecar: CPTS_MAX_DENY: expected integer, got '{val}'"
+                ),
+            }
+        }
+
+        if let Some(val) = error_policy {
+            match val.as_str() {
+                "allow" => self.quorum.error_policy = Decision::Allow,
+                "deny" => self.quorum.error_policy = Decision::Deny,
+                "passthrough" => self.quorum.error_policy = Decision::Passthrough,
+                _ => eprintln!(
+                    "claude-pretool-sidecar: CPTS_ERROR_POLICY: expected 'allow', 'deny', or 'passthrough', got '{val}'"
+                ),
+            }
+        }
+
+        if let Some(val) = timeout {
+            match val.parse::<u64>() {
+                Ok(n) => self.timeout.provider_default = n,
+                Err(_) => eprintln!(
+                    "claude-pretool-sidecar: CPTS_TIMEOUT: expected integer, got '{val}'"
+                ),
+            }
+        }
+    }
+
     /// Validate the loaded configuration for potential issues.
     ///
     /// Checks:
@@ -633,6 +697,79 @@ mod tests {
 
         let result = config.validate();
         assert!(result.warnings.is_empty());
+    }
+
+    /// # Environment Variable Override Tests
+    ///
+    /// These tests use `apply_env_overrides_from()` to avoid mutating
+    /// process-global env vars, ensuring test isolation.
+
+    /// CPTS_MIN_ALLOW overrides quorum.min_allow.
+    #[test]
+    fn env_override_min_allow() {
+        let mut config = Config::empty();
+        assert_eq!(config.quorum.min_allow, 1); // default
+        config.apply_env_overrides_from(Some("3".to_string()), None, None, None);
+        assert_eq!(config.quorum.min_allow, 3);
+    }
+
+    /// CPTS_MAX_DENY overrides quorum.max_deny.
+    #[test]
+    fn env_override_max_deny() {
+        let mut config = Config::empty();
+        assert_eq!(config.quorum.max_deny, 0); // default
+        config.apply_env_overrides_from(None, Some("2".to_string()), None, None);
+        assert_eq!(config.quorum.max_deny, 2);
+    }
+
+    /// CPTS_ERROR_POLICY overrides quorum.error_policy.
+    #[test]
+    fn env_override_error_policy() {
+        let mut config = Config::empty();
+        assert_eq!(config.quorum.error_policy, Decision::Passthrough); // default
+        config.apply_env_overrides_from(None, None, Some("deny".to_string()), None);
+        assert_eq!(config.quorum.error_policy, Decision::Deny);
+    }
+
+    /// CPTS_TIMEOUT overrides timeout.provider_default.
+    #[test]
+    fn env_override_timeout() {
+        let mut config = Config::empty();
+        assert_eq!(config.timeout.provider_default, 5000); // default
+        config.apply_env_overrides_from(None, None, None, Some("10000".to_string()));
+        assert_eq!(config.timeout.provider_default, 10000);
+    }
+
+    /// Invalid number for CPTS_MIN_ALLOW keeps the default value.
+    #[test]
+    fn env_override_invalid_number_keeps_default() {
+        let mut config = Config::empty();
+        config.apply_env_overrides_from(Some("abc".to_string()), None, None, None);
+        assert_eq!(config.quorum.min_allow, 1); // unchanged
+    }
+
+    /// Invalid policy string for CPTS_ERROR_POLICY keeps the default value.
+    #[test]
+    fn env_override_invalid_policy_keeps_default() {
+        let mut config = Config::empty();
+        config.apply_env_overrides_from(None, None, Some("invalid".to_string()), None);
+        assert_eq!(config.quorum.error_policy, Decision::Passthrough); // unchanged
+    }
+
+    /// Multiple env overrides can be applied simultaneously.
+    #[test]
+    fn env_override_multiple_values() {
+        let mut config = Config::empty();
+        config.apply_env_overrides_from(
+            Some("5".to_string()),
+            Some("3".to_string()),
+            Some("allow".to_string()),
+            Some("15000".to_string()),
+        );
+        assert_eq!(config.quorum.min_allow, 5);
+        assert_eq!(config.quorum.max_deny, 3);
+        assert_eq!(config.quorum.error_policy, Decision::Allow);
+        assert_eq!(config.timeout.provider_default, 15000);
     }
 
     /// Duplicate provider names should produce an error.

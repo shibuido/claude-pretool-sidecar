@@ -479,6 +479,58 @@ fn cli_no_passthrough_no_config_errors() {
         .stderr(predicate::str::contains("config error"));
 }
 
+/// # ENV: CPTS_MIN_ALLOW changes voting behavior
+///
+/// When config has min_allow=1 (met by one allow provider), but
+/// CPTS_MIN_ALLOW=3 overrides it, quorum can't be met with one provider,
+/// so the default_decision (passthrough) is used instead of allow.
+#[test]
+fn env_cpts_min_allow_overrides_config() {
+    let config = format!(
+        r#"
+        [quorum]
+        min_allow = 1
+        default_decision = "passthrough"
+
+        [[providers]]
+        name = "allower"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let config_file = write_temp_config(&config);
+    let payload = read_payload("hook-bash-payload.json");
+
+    // Without env override: min_allow=1, one allow provider → allow
+    let output_no_env = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file.path())
+        .write_stdin(payload.clone())
+        .output()
+        .unwrap();
+
+    assert!(output_no_env.status.success());
+    let stdout = String::from_utf8(output_no_env.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(extract_decision(&response), Some("allow"));
+
+    // With CPTS_MIN_ALLOW=3: quorum can't be met → passthrough
+    let output_with_env = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file.path())
+        .env("CPTS_MIN_ALLOW", "3")
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output_with_env.status.success());
+    let stdout = String::from_utf8(output_with_env.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // Passthrough = empty object
+    assert_eq!(response, serde_json::json!({}));
+}
+
 /// # CLI: --version shows version
 ///
 /// The --version flag should output the version from Cargo.toml.
