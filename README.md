@@ -47,7 +47,7 @@ args = ["--output", "/tmp/claude-tool-requests.jsonl"]
 mode = "fyi"
 EOF
 
-# 3. Install both binaries
+# 3. Install all binaries
 cargo install --path .
 
 # 4. Register as a Claude Code hook (add to ~/.claude/settings.json)
@@ -88,12 +88,35 @@ Binaries are produced in `target/release/`:
 
 * `claude-pretool-sidecar` -- the main sidecar binary
 * `claude-pretool-logger` -- companion FYI logger
+* `claude-pretool-analyzer` -- session analytics tool
+* `claude-pretool-notifier` -- desktop notification provider
 
-Install to your PATH:
+Install all four to your PATH:
 
 ```bash
 cargo install --path .
 ```
+
+### Package Managers
+
+* **AUR (Arch Linux)**: See `packaging/aur/PKGBUILD`
+* **Homebrew**: See `packaging/brew/claude-pretool-sidecar.rb`
+
+Release builds can be produced via `packaging/release.sh`.
+
+## CLI Flags
+
+```
+claude-pretool-sidecar [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--config <PATH>` | Explicit config file path (highest priority, overrides env var and file discovery) |
+| `--validate` | Validate the config file and exit (reports errors and warnings) |
+| `--post-tool` | PostToolUse mode: audit-log the event, skip provider voting, output `{}` passthrough |
+| `--passthrough` | When no config file is found, return passthrough instead of erroring (useful for initial setup) |
+| `--version` | Show version and exit |
 
 ## Configuration
 
@@ -134,6 +157,7 @@ command = "/usr/local/bin/my-security-checker"
 args = ["--strict"]
 mode = "vote"              # "vote" (participates in quorum) or "fyi" (logging only)
 timeout = 10000            # Override default timeout for this provider
+weight = 2                 # Vote weight for quorum aggregation (default: 1)
 env = { MY_VAR = "value" } # Additional environment variables
 
 [[providers]]
@@ -141,6 +165,30 @@ name = "audit-logger"
 command = "claude-pretool-logger"
 args = ["--output", "/var/log/claude-tools.jsonl"]
 mode = "fyi"               # Output ignored, just receives the payload
+
+# Decision caching (opt-in)
+[cache]
+enabled = true
+ttl_seconds = 300          # How long cached decisions remain valid (default: 300)
+
+# Provider health monitoring (opt-in)
+[health]
+enabled = true
+max_error_rate = 0.5       # Disable provider if error rate exceeds this (0.0 to 1.0)
+min_calls_before_disable = 3  # Minimum calls before a provider can be disabled
+
+# Built-in rules engine (fast-path, evaluated before providers)
+[[rules]]
+tool = "Bash"
+input = "\"command\":\\s*\"(ls |pwd|echo )"
+decision = "allow"
+reason = "Safe read-only commands auto-approved"
+
+[[rules]]
+tool = "Bash"
+input = "rm -rf|dd if=|mkfs"
+decision = "deny"
+reason = "Dangerous command blocked by rule"
 ```
 
 See the `examples/` directory for ready-to-use configurations:
@@ -148,6 +196,8 @@ See the `examples/` directory for ready-to-use configurations:
 * `examples/config-logging-only.toml` -- pure logging, no decisions
 * `examples/config-single-gatekeeper.toml` -- one provider decides everything
 * `examples/config-multi-provider.toml` -- three voters plus a logger
+* `examples/config-with-rules.toml` -- rules engine with auto-approval patterns
+* `examples/config-with-notifications.toml` -- desktop notifications as an FYI provider
 
 ### Environment Variable Overrides
 
@@ -215,6 +265,91 @@ default_decision = "passthrough"
 * **Zero non-FYI providers**: Returns `default_decision` immediately
 * **All providers error**: Depends on `error_policy`; if all convert to passthrough and `min_allow > 0`, returns `default_decision`
 * **Provider timeout**: Treated as error, subject to `error_policy`
+
+### Weighted Voting
+
+Providers can be assigned a `weight` (default: 1) to give certain providers more influence in the quorum. A provider with `weight = 2` voting "allow" contributes 2 to `allow_count`. This works with all vote types (allow, deny, passthrough, error).
+
+```toml
+[[providers]]
+name = "trusted-checker"
+command = "/usr/local/bin/trusted-checker"
+mode = "vote"
+weight = 3   # This provider's vote counts triple
+```
+
+## Rules Engine
+
+The built-in rules engine provides a fast-path shortcut for common policies. Rules are regex-based patterns that match against `tool_name` and optionally `tool_input`, returning an immediate decision without invoking any external providers.
+
+### How It Works
+
+1. Rules are evaluated in order -- first match wins
+2. `tool` is a regex matched against `tool_name` (use `"*"` for any tool)
+3. `input` (optional) is a regex matched against the JSON-serialized `tool_input`
+4. If no rule matches, the request falls through to normal provider voting
+
+### Configuration
+
+```toml
+# Allow safe read-only Bash commands
+[[rules]]
+tool = "Bash"
+input = "\"command\":\\s*\"(ls |pwd|echo |cat |head |tail )"
+decision = "allow"
+reason = "Safe read-only commands auto-approved"
+
+# Block dangerous commands
+[[rules]]
+tool = "Bash"
+input = "rm -rf|dd if=|mkfs|chmod 777"
+decision = "deny"
+reason = "Dangerous command blocked by rule"
+
+# Block writes to sensitive files
+[[rules]]
+tool = "Write|Edit"
+input = "\\.env|\\.credentials|id_rsa"
+decision = "deny"
+reason = "Sensitive file write blocked by rule"
+
+# Allow all Read and search tools
+[[rules]]
+tool = "Read|Glob|Grep"
+decision = "allow"
+reason = "Read-only access always permitted"
+```
+
+See `examples/config-with-rules.toml` for a complete example.
+
+## Decision Caching
+
+File-based cache that avoids redundant provider invocations when the same `(tool_name, tool_input)` combination is seen within a configurable TTL. Cache files are scoped per Claude Code session and stored in `/tmp` (the OS handles cleanup).
+
+### Configuration
+
+```toml
+[cache]
+enabled = true        # Opt-in (default: false)
+ttl_seconds = 300     # How long cached decisions remain valid (default: 300)
+```
+
+Cache files: `/tmp/cpts-cache-{session_id}.json`
+
+## Provider Health Monitoring
+
+Tracks provider error rates across invocations within a session and auto-disables consistently failing providers (e.g., binary missing, permission denied, crashing). Once disabled, a provider stays disabled for the remainder of the session. A new Claude Code conversation resets all health state.
+
+### Configuration
+
+```toml
+[health]
+enabled = true                  # Opt-in (default: false)
+max_error_rate = 0.5            # Disable if error rate exceeds 50%
+min_calls_before_disable = 3    # Minimum calls before disabling is allowed
+```
+
+Health files: `/tmp/cpts-health-{session_id}.json`
 
 ## Writing Providers
 
@@ -298,6 +433,40 @@ mode = "fyi"
 
 When no `--output` is specified, it logs to stderr. Each log entry is a JSON line with a timestamp envelope wrapping the original hook payload.
 
+### claude-pretool-analyzer
+
+A standalone CLI tool that reads audit JSONL files and prints session summary analytics: decision breakdown, per-tool statistics, provider performance, Pre/Post correlation, and auto-approval candidate detection.
+
+```bash
+# Analyze an audit directory
+claude-pretool-analyzer /var/log/claude-pretool-sidecar/
+
+# Analyze a single file
+claude-pretool-analyzer /var/log/claude-pretool-sidecar/audit-2026-03-27.jsonl
+
+# Output as JSON (for piping to jq, dashboards, etc.)
+claude-pretool-analyzer --json /var/log/claude-pretool-sidecar/
+```
+
+The analyzer identifies patterns that are always approved (3+ occurrences with 100% allow rate), which helps you write rules to auto-approve them and reduce provider overhead.
+
+### claude-pretool-notifier
+
+A companion FYI provider that sends desktop notifications (via `notify-send` on Linux, `osascript` on macOS) when Claude Code requests tool approval. Useful for users who multitask -- get a notification when Claude is waiting for permission.
+
+```toml
+[[providers]]
+name = "desktop-notify"
+command = "claude-pretool-notifier"
+mode = "fyi"
+```
+
+Environment variables:
+
+* `CPTS_NOTIFY_URGENCY` -- `low`, `normal`, or `critical` (default: `normal`)
+* `CPTS_NOTIFY_TIMEOUT` -- display time in milliseconds (default: `5000`)
+* `CPTS_NOTIFY_DISABLE` -- set to `"1"` to disable notifications (still outputs passthrough)
+
 ## Audit Logging
 
 The sidecar has built-in audit logging separate from FYI providers. It records the full decision lifecycle: which providers were consulted, how each voted, response times, and the final decision.
@@ -313,9 +482,10 @@ Logs are written as JSON Lines (one JSON object per line):
   "tool_name": "Bash",
   "tool_input": {"command": "ls -la"},
   "session_id": "sess-123",
+  "tool_use_id": "toolu_01ABC123",
   "providers": [
-    {"name": "security-checker", "vote": "allow", "response_time_ms": 45},
-    {"name": "team-policy", "vote": "allow", "response_time_ms": 120},
+    {"name": "security-checker", "vote": "allow", "response_time_ms": 45, "weight": 2},
+    {"name": "team-policy", "vote": "allow", "response_time_ms": 120, "weight": 1},
     {"name": "audit-logger", "mode": "fyi", "response_time_ms": 12}
   ],
   "final_decision": "allow",
@@ -333,6 +503,12 @@ max_total_bytes = 10485760   # 10 MB total
 max_file_bytes = 5242880     # 5 MB per file
 ```
 
+### PostToolUse Correlation
+
+When the sidecar is registered for both PreToolUse and PostToolUse hooks, audit entries include a `tool_use_id` field that correlates pre and post events. PostToolUse entries also include a `tool_result_summary` -- a brief string (max 200 chars) summarizing the tool's output (e.g., `"success (42 bytes)"` or `"error: permission denied"`).
+
+This enables the analyzer to compute execution rates: how many requested tool calls actually completed.
+
 ### Log Rotation
 
 * **Date-based chunking**: Files are named `audit-YYYY-MM-DD.jsonl`
@@ -342,7 +518,34 @@ max_file_bytes = 5242880     # 5 MB per file
 
 ## Claude Code Integration
 
-### Method 1: Manual Hook Configuration
+### Method 1: Plugin (Recommended)
+
+The `plugin/` directory provides a Claude Code plugin with hooks, skills, and resources. Load it with:
+
+```bash
+claude --plugin-dir /path/to/claude-pretool-sidecar/plugin
+```
+
+The plugin provides:
+
+* **Hooks**: SessionStart (binary check), PreToolUse (voting), PostToolUse (audit)
+* **Skills**: `/configure-sidecar`, `/diagnose-sidecar`, `/file-issue`
+* **Scripts**: `install-hooks.sh` (non-destructive, idempotent hook installation), `uninstall-hooks.sh`, `check-sidecar.sh`
+* **Resources**: Config schema reference, troubleshooting guide, hook setup guide
+
+Install hooks to your Claude Code settings (merges alongside existing hooks):
+
+```bash
+# Project-level (writes to .claude/settings.local.json)
+bash plugin/scripts/install-hooks.sh --scope project
+
+# User-level (writes to ~/.claude/settings.json)
+bash plugin/scripts/install-hooks.sh --scope user
+```
+
+See `plugin/README.md` for full details.
+
+### Method 2: Manual Hook Configuration
 
 Add to `.claude/settings.json` (project-level) or `~/.claude/settings.json` (user-level):
 
@@ -399,7 +602,7 @@ The sidecar returns responses in Claude Code's expected format:
 cargo test
 ```
 
-The test suite includes 43 tests (37 unit + 6 integration) covering config parsing, quorum logic, hook format compliance, provider execution, and audit logging.
+The test suite includes 157 Rust tests (unit + integration) covering config parsing, quorum logic, weighted voting, hook format compliance, provider execution, audit logging, rules engine, decision caching, health monitoring, CLI parsing, analyzer, and notifier. The QA suite adds ~70 shell-based tests for a total of ~227 tests.
 
 ### QA Scripts
 
@@ -432,26 +635,46 @@ See `qa/README.md` for full details on test suites, Docker management commands, 
 ```
 claude-pretool-sidecar/
 ├── src/
-│   ├── main.rs              # Entry point: stdin -> providers -> quorum -> stdout
-│   ├── hook.rs              # Hook event/response types
-│   ├── config.rs            # TOML config parsing
-│   ├── quorum.rs            # Vote aggregation algorithm
-│   ├── provider.rs          # External process execution
-│   ├── audit.rs             # Audit logging with rotation
+│   ├── main.rs              # Entry point: cli → config → rules → cache → health → providers → quorum → audit
+│   ├── cli.rs               # CLI argument parsing (clap)
+│   ├── config.rs            # TOML config parsing + CPTS_* env overrides
+│   ├── hook.rs              # Hook event/response types (Pre/PostToolUse)
+│   ├── quorum.rs            # Vote aggregation algorithm (weighted)
+│   ├── provider.rs          # External process execution + weighted votes
+│   ├── audit.rs             # Audit logging with rotation + tool_result summarization
+│   ├── rules.rs             # Built-in regex rule engine (fast-path)
+│   ├── cache.rs             # File-based decision caching (per-session)
+│   ├── health.rs            # Provider health monitoring + auto-disable
 │   └── bin/
-│       └── logger.rs        # Companion FYI logger binary
+│       ├── logger.rs        # FYI logger binary
+│       ├── analyzer.rs      # Session analytics binary
+│       └── notifier.rs      # Desktop notification binary
 ├── tests/                   # Integration tests
-├── examples/                # Example TOML configurations
+├── examples/                # Example TOML configurations + provider scripts
 │   ├── config-logging-only.toml
 │   ├── config-single-gatekeeper.toml
-│   └── config-multi-provider.toml
+│   ├── config-multi-provider.toml
+│   ├── config-with-rules.toml
+│   ├── config-with-notifications.toml
+│   └── providers/           # Example provider scripts (bash, python)
+├── plugin/                  # Claude Code plugin
+│   ├── hooks/               # Hook definitions (hooks.json)
+│   ├── skills/              # Slash commands (configure, diagnose, file-issue)
+│   ├── scripts/             # install-hooks.sh, uninstall-hooks.sh, check-sidecar.sh
+│   └── resources/           # Config schema, troubleshooting, hook setup guides
+├── packaging/               # Distribution packaging
+│   ├── aur/                 # Arch Linux PKGBUILD
+│   ├── brew/                # Homebrew formula
+│   └── release.sh           # Release build script
 ├── docs/
 │   ├── design/              # Design documents
 │   │   ├── architecture.md
 │   │   ├── voting-quorum.md
 │   │   ├── stdio-protocol.md
 │   │   ├── configuration.md
-│   │   └── log-rotation.md
+│   │   ├── log-rotation.md
+│   │   ├── claude-code-hooks-reference.md
+│   │   └── mcp-permission-tool-analysis.md
 │   └── guidelines/          # Development guidelines
 ├── qa/                      # QA test suites and Docker environments
 │   ├── scripts/             # Automated test scripts
