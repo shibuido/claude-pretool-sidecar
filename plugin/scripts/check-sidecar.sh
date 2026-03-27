@@ -1,24 +1,78 @@
 #!/usr/bin/env bash
 # check-sidecar.sh — Verify claude-pretool-sidecar installation and configuration
 #
-# Usage: bash check-sidecar.sh
-# Or if installed as a plugin: bash "${CLAUDE_PLUGIN_ROOT}/scripts/check-sidecar.sh"
+# Usage:
+#   bash check-sidecar.sh                  # Full health check with all output
+#   bash check-sidecar.sh --quiet          # Only output errors (for SessionStart hook)
+#   bash check-sidecar.sh --install-hint   # Suggest install-hooks.sh if hooks not configured
+#
+# Or if installed as a plugin:
+#   bash "${CLAUDE_PLUGIN_ROOT}/scripts/check-sidecar.sh"
 
 set -euo pipefail
+
+QUIET=false
+INSTALL_HINT=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --quiet)
+            QUIET=true
+            shift
+            ;;
+        --install-hint)
+            INSTALL_HINT=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--quiet] [--install-hint]"
+            echo
+            echo "  --quiet          Only output errors (for use in SessionStart hooks)"
+            echo "  --install-hint   Suggest install-hooks.sh if hooks aren't configured"
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
 PASS=0
 WARN=0
 FAIL=0
 
-pass() { echo "  [OK]   $1"; PASS=$((PASS + 1)); }
-warn() { echo "  [WARN] $1"; WARN=$((WARN + 1)); }
-fail() { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); }
+pass() {
+    PASS=$((PASS + 1))
+    if [[ "$QUIET" == false ]]; then
+        echo "  [OK]   $1"
+    fi
+}
 
-echo "=== claude-pretool-sidecar health check ==="
-echo
+warn() {
+    WARN=$((WARN + 1))
+    if [[ "$QUIET" == false ]]; then
+        echo "  [WARN] $1"
+    fi
+}
+
+fail() {
+    FAIL=$((FAIL + 1))
+    # Always output failures, even in quiet mode
+    echo "  [FAIL] $1"
+}
+
+info() {
+    if [[ "$QUIET" == false ]]; then
+        echo "$1"
+    fi
+}
+
+info "=== claude-pretool-sidecar health check ==="
+info ""
 
 # 1. Check binary in PATH
-echo "--- Binary ---"
+info "--- Binary ---"
 if command -v claude-pretool-sidecar >/dev/null 2>&1; then
     SIDECAR_PATH="$(command -v claude-pretool-sidecar)"
     pass "Binary found: ${SIDECAR_PATH}"
@@ -31,13 +85,15 @@ if command -v claude-pretool-sidecar >/dev/null 2>&1; then
     fi
 else
     fail "claude-pretool-sidecar not found in PATH"
-    echo "       Install with: cargo install --path <source-dir>"
-    echo "       Or add ~/.cargo/bin to PATH"
+    if [[ "$QUIET" == false ]]; then
+        echo "       Install with: cargo install --path <source-dir>"
+        echo "       Or add ~/.cargo/bin to PATH"
+    fi
 fi
-echo
+info ""
 
 # 2. Check config file
-echo "--- Configuration ---"
+info "--- Configuration ---"
 CONFIG_FOUND=""
 
 if [ -n "${CLAUDE_PRETOOL_SIDECAR_CONFIG:-}" ]; then
@@ -58,7 +114,9 @@ elif [ -f "${HOME}/.claude-pretool-sidecar.toml" ]; then
     CONFIG_FOUND="${HOME}/.claude-pretool-sidecar.toml"
 else
     warn "No config file found in standard locations"
-    echo "       Searched: .claude-pretool-sidecar.toml, ~/.config/claude-pretool-sidecar/config.toml, ~/.claude-pretool-sidecar.toml"
+    if [[ "$QUIET" == false ]]; then
+        echo "       Searched: .claude-pretool-sidecar.toml, ~/.config/claude-pretool-sidecar/config.toml, ~/.claude-pretool-sidecar.toml"
+    fi
 fi
 
 # 3. Validate config if binary and config both exist
@@ -74,10 +132,10 @@ if [ -n "$CONFIG_FOUND" ] && command -v claude-pretool-sidecar >/dev/null 2>&1; 
         fi
     fi
 fi
-echo
+info ""
 
 # 4. Check hook registration
-echo "--- Hook Registration ---"
+info "--- Hook Registration ---"
 HOOKS_FOUND=false
 
 for SETTINGS_FILE in ".claude/settings.json" ".claude/settings.local.json" "${HOME}/.claude/settings.json"; do
@@ -91,25 +149,39 @@ done
 
 if [ "$HOOKS_FOUND" = false ]; then
     warn "No hook registration found in Claude Code settings"
-    echo "       If using the plugin system, this is expected"
-    echo "       Otherwise, add hooks to .claude/settings.json (see resources/hook-setup.md)"
+    if [[ "$QUIET" == false ]]; then
+        echo "       If using the plugin system, this is expected"
+        echo "       Otherwise, add hooks to .claude/settings.json (see resources/hook-setup.md)"
+    fi
+    if [[ "$INSTALL_HINT" == true ]]; then
+        HINT_SCRIPT=""
+        if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+            HINT_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/install-hooks.sh"
+        else
+            HINT_SCRIPT="plugin/scripts/install-hooks.sh"
+        fi
+        echo
+        echo "  Hint: Run the install script to register hooks:"
+        echo "    bash ${HINT_SCRIPT} --scope project"
+        echo "    bash ${HINT_SCRIPT} --scope user"
+    fi
 fi
-echo
+info ""
 
 # 5. Summary
-echo "=== Summary ==="
-echo "  Passed: ${PASS}  Warnings: ${WARN}  Failed: ${FAIL}"
+info "=== Summary ==="
+info "  Passed: ${PASS}  Warnings: ${WARN}  Failed: ${FAIL}"
 
 if [ "$FAIL" -gt 0 ]; then
-    echo
-    echo "Some checks failed. See above for details."
+    info ""
+    info "Some checks failed. See above for details."
     exit 1
 elif [ "$WARN" -gt 0 ]; then
-    echo
-    echo "Some warnings. The sidecar may work but review the warnings above."
+    info ""
+    info "Some warnings. The sidecar may work but review the warnings above."
     exit 0
 else
-    echo
-    echo "All checks passed."
+    info ""
+    info "All checks passed."
     exit 0
 fi
