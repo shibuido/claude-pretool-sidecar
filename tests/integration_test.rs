@@ -601,6 +601,133 @@ fn weighted_provider_changes_voting_outcome() {
     assert_eq!(response2, serde_json::json!({}));
 }
 
+/// # Rules Engine: Allow rule short-circuits providers
+///
+/// When a rules engine match returns "allow", providers should not be invoked.
+/// We verify this by configuring a deny provider that would deny the request
+/// if it were invoked, but the rules engine allow takes priority.
+#[test]
+fn rules_engine_allow_shortcircuits_providers() {
+    let config = format!(
+        r#"
+        [[rules]]
+        tool = "Bash"
+        input = "ls"
+        decision = "allow"
+        reason = "ls is safe"
+
+        [quorum]
+        min_allow = 1
+        max_deny = 0
+
+        [[providers]]
+        name = "denier"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-deny.sh").display()
+    );
+    let config_file = write_temp_config(&config);
+    let payload = read_payload("hook-bash-payload.json");
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file.path())
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // Rules engine allow should win over the deny provider (which was never called)
+    assert_eq!(extract_decision(&response), Some("allow"));
+}
+
+/// # Rules Engine: Deny rule short-circuits providers
+///
+/// When a rules engine match returns "deny", providers should not be invoked.
+/// We verify this by configuring an allow provider that would allow the request
+/// if it were invoked, but the rules engine deny takes priority.
+#[test]
+fn rules_engine_deny_shortcircuits_providers() {
+    let config = format!(
+        r#"
+        [[rules]]
+        tool = "Bash"
+        input = "rm -rf"
+        decision = "deny"
+        reason = "Dangerous command blocked"
+
+        [quorum]
+        min_allow = 1
+        max_deny = 0
+
+        [[providers]]
+        name = "allower"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let config_file = write_temp_config(&config);
+    // Use a payload with rm -rf in the command
+    let payload = r#"{"tool_name": "Bash", "tool_input": {"command": "rm -rf /important"}, "hook_event": "PreToolUse", "session_id": "test-session-002"}"#;
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file.path())
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // Rules engine deny should win over the allow provider (which was never called)
+    assert_eq!(extract_decision(&response), Some("deny"));
+}
+
+/// # Rules Engine: No match falls through to providers
+///
+/// When no rule matches, normal provider voting should proceed.
+#[test]
+fn rules_engine_no_match_falls_through_to_providers() {
+    let config = format!(
+        r#"
+        [[rules]]
+        tool = "Write"
+        decision = "deny"
+        reason = "No writes allowed"
+
+        [quorum]
+        min_allow = 1
+        max_deny = 0
+
+        [[providers]]
+        name = "allower"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let config_file = write_temp_config(&config);
+    let payload = read_payload("hook-bash-payload.json"); // Bash tool, not Write
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file.path())
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // Rule is for Write, payload is Bash → no match → provider decides → allow
+    assert_eq!(extract_decision(&response), Some("allow"));
+}
+
 /// # CLI: --version shows version
 ///
 /// The --version flag should output the version from Cargo.toml.
