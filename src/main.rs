@@ -27,6 +27,7 @@ mod audit;
 mod cache;
 mod cli;
 mod config;
+mod health;
 mod hook;
 mod provider;
 mod quorum;
@@ -117,6 +118,16 @@ fn main() {
         hook_event.session_id.as_deref(),
     );
 
+    // Initialize health tracker (file-based, scoped per session)
+    let mut health_tracker = if config.health.enabled {
+        Some(health::HealthTracker::new(
+            &config.health,
+            hook_event.session_id.as_deref(),
+        ))
+    } else {
+        None
+    };
+
     // Check cache before invoking providers
     let (decision, results) =
         if let Some(cached_decision) = decision_cache.get(&hook_event.tool_name, &hook_event.tool_input) {
@@ -126,9 +137,65 @@ fn main() {
             );
             (cached_decision, vec![])
         } else {
-            // Execute providers and collect detailed results
-            let results =
-                provider::execute_all(&config.providers, &hook_event, &config.timeout);
+            // Filter providers by health status, producing skip results for disabled ones
+            let (healthy_providers, skip_results): (Vec<_>, Vec<_>) = config
+                .providers
+                .iter()
+                .map(|p| {
+                    if let Some(ref tracker) = health_tracker {
+                        if !tracker.is_healthy(&p.name) {
+                            let stats = tracker.get_stats(&p.name);
+                            let (errors, total) = stats
+                                .map(|s| (s.errors, s.total_calls))
+                                .unwrap_or((0, 0));
+                            return Err(provider::ProviderResult {
+                                name: p.name.clone(),
+                                vote: provider::Vote::Error,
+                                mode: match p.mode {
+                                    config::ProviderMode::Vote => "vote",
+                                    config::ProviderMode::Fyi => "fyi",
+                                }
+                                .to_string(),
+                                response_time_ms: 0,
+                                reason: None,
+                                error: Some(format!(
+                                    "provider disabled (health: {} errors in {} calls)",
+                                    errors, total
+                                )),
+                            });
+                        }
+                    }
+                    Ok(p)
+                })
+                .partition::<Vec<_>, _>(|r| r.is_ok());
+
+            let healthy_providers: Vec<_> = healthy_providers
+                .into_iter()
+                .map(|r| r.unwrap().clone())
+                .collect();
+            let mut skip_results: Vec<_> = skip_results
+                .into_iter()
+                .map(|r| r.unwrap_err())
+                .collect();
+
+            // Execute healthy providers and collect detailed results
+            let mut results =
+                provider::execute_all(&healthy_providers, &hook_event, &config.timeout);
+
+            // Record results in health tracker
+            if let Some(ref mut tracker) = health_tracker {
+                for result in &results {
+                    let is_error = result.vote == provider::Vote::Error;
+                    tracker.record_result(
+                        &result.name,
+                        is_error,
+                        result.error.as_deref(),
+                    );
+                }
+            }
+
+            // Combine executed results with skip results
+            results.append(&mut skip_results);
 
             // Extract weighted votes from non-FYI providers for quorum aggregation
             let votes = provider::weighted_votes_from_results(&results);
@@ -143,6 +210,15 @@ fn main() {
         };
 
     let total_time_ms = start.elapsed().as_millis() as u64;
+
+    // Save health state and print summary if any providers are degraded
+    if let Some(ref tracker) = health_tracker {
+        tracker.save();
+        let summary = tracker.summary();
+        if !summary.is_empty() {
+            eprintln!("{}", summary);
+        }
+    }
 
     // Write audit log entry (if configured)
     audit::log_decision(&config.audit, &hook_event, &results, decision, total_time_ms);
