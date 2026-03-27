@@ -24,6 +24,7 @@
 //! See `docs/design/` for detailed design documents.
 
 mod audit;
+mod cache;
 mod cli;
 mod config;
 mod hook;
@@ -110,14 +111,36 @@ fn main() {
         return;
     }
 
-    // Execute providers and collect detailed results
-    let results = provider::execute_all(&config.providers, &hook_event, &config.timeout);
+    // Initialize cache (file-based, scoped per session)
+    let decision_cache = cache::DecisionCache::new(
+        &config.cache,
+        hook_event.session_id.as_deref(),
+    );
 
-    // Extract votes from non-FYI providers for quorum aggregation
-    let votes = provider::votes_from_results(&results);
+    // Check cache before invoking providers
+    let (decision, results) =
+        if let Some(cached_decision) = decision_cache.get(&hook_event.tool_name, &hook_event.tool_input) {
+            eprintln!(
+                "claude-pretool-sidecar: cache hit for {}(…) → {}",
+                hook_event.tool_name, cached_decision
+            );
+            (cached_decision, vec![])
+        } else {
+            // Execute providers and collect detailed results
+            let results =
+                provider::execute_all(&config.providers, &hook_event, &config.timeout);
 
-    // Aggregate votes using quorum rules
-    let decision = quorum::aggregate(&config.quorum, &votes);
+            // Extract votes from non-FYI providers for quorum aggregation
+            let votes = provider::votes_from_results(&results);
+
+            // Aggregate votes using quorum rules
+            let decision = quorum::aggregate(&config.quorum, &votes);
+
+            // Store in cache for future identical calls
+            decision_cache.put(&hook_event.tool_name, &hook_event.tool_input, decision);
+
+            (decision, results)
+        };
 
     let total_time_ms = start.elapsed().as_millis() as u64;
 

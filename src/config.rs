@@ -40,6 +40,9 @@ pub struct Config {
 
     #[serde(default)]
     pub audit: AuditConfig,
+
+    #[serde(default)]
+    pub cache: CacheConfig,
 }
 
 /// Audit logging configuration.
@@ -87,6 +90,41 @@ fn default_max_total_bytes() -> u64 {
 
 fn default_max_file_bytes() -> u64 {
     5 * 1024 * 1024 // 5 MB
+}
+
+/// Cache configuration for provider decision caching.
+///
+/// When enabled, identical (tool_name, tool_input) pairs within the TTL
+/// return a cached decision without re-invoking providers.
+/// Cache is file-based, scoped per session, stored in /tmp.
+///
+/// ```toml
+/// [cache]
+/// enabled = false
+/// ttl_seconds = 60
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct CacheConfig {
+    /// Whether caching is enabled (opt-in, default false).
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// How long cached decisions remain valid, in seconds.
+    #[serde(default = "default_cache_ttl")]
+    pub ttl_seconds: u64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ttl_seconds: default_cache_ttl(),
+        }
+    }
+}
+
+fn default_cache_ttl() -> u64 {
+    60
 }
 
 /// Quorum rules for vote aggregation.
@@ -280,6 +318,7 @@ impl Config {
             timeout: TimeoutConfig::default(),
             providers: Vec::new(),
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         }
     }
 
@@ -597,6 +636,7 @@ mod tests {
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         };
 
         let result = config.validate();
@@ -624,6 +664,7 @@ mod tests {
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         };
 
         let result = config.validate();
@@ -651,6 +692,7 @@ mod tests {
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         };
 
         let result = config.validate();
@@ -672,6 +714,7 @@ mod tests {
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         };
 
         let result = config.validate();
@@ -693,6 +736,7 @@ mod tests {
                 env: std::collections::HashMap::new(),
             }],
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         };
 
         let result = config.validate();
@@ -797,6 +841,7 @@ mod tests {
                 },
             ],
             audit: AuditConfig::default(),
+            cache: CacheConfig::default(),
         };
 
         let result = config.validate();
