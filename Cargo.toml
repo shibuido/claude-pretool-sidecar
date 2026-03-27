@@ -5,6 +5,11 @@ edition = "2024"
 description = "A composable sidecar for Claude Code hooks that aggregates tool-approval votes from multiple providers"
 license = "MIT"
 repository = "https://github.com/shibuido/claude-pretool-sidecar"
+homepage = "https://github.com/shibuido/claude-pretool-sidecar"
+readme = "README.md"
+keywords = ["claude-code", "hooks", "tool-approval", "sidecar"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["qa/", "tests/", ".claude/", "unstructured/", "ramblings/"]
 
 [[bin]]
 name = "claude-pretool-sidecar"
