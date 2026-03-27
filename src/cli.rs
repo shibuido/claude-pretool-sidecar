@@ -37,7 +37,6 @@ mod tests {
     ///
     /// These tests verify that command-line arguments are correctly parsed
     /// into the Cli struct with proper defaults.
-
     /// No arguments should parse with all defaults.
     #[test]
     fn no_args_parses_with_defaults() {

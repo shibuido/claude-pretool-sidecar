@@ -286,7 +286,6 @@ mod tests {
     ///
     /// These tests verify that we correctly parse the JSON output from
     /// provider scripts, as specified in `docs/design/stdio-protocol.md`.
-
     /// A valid "allow" response should parse to Vote::Allow.
     #[test]
     fn parse_allow_response() {
@@ -348,7 +347,6 @@ mod tests {
     ///
     /// These tests verify that the timeout enforcement in `execute_one`
     /// correctly kills slow providers and returns Vote::Error.
-
     /// Helper: create a minimal ProviderConfig for testing.
     fn test_provider(command: &str, args: &[&str], timeout_ms: Option<u64>) -> ProviderConfig {
         ProviderConfig {

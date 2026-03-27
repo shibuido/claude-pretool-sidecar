@@ -81,7 +81,6 @@ mod tests {
     /// These tests verify the vote aggregation algorithm described in
     /// `docs/design/voting-quorum.md`. Each test corresponds to an example
     /// or edge case from that document.
-
     fn default_config() -> QuorumConfig {
         QuorumConfig {
             min_allow: 1,

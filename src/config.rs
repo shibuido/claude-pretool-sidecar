@@ -573,7 +573,6 @@ mod tests {
     ///
     /// These tests verify that TOML configuration files are correctly parsed
     /// into our Config struct, with proper defaults for omitted fields.
-
     /// A minimal config with just one provider should parse with all defaults.
     #[test]
     fn parse_minimal_config() {
@@ -651,7 +650,6 @@ mod tests {
     }
 
     /// # Config Loading Tests
-
     /// Load with explicit path should use that path.
     #[test]
     fn load_with_explicit_path_uses_path() {
@@ -705,7 +703,6 @@ mod tests {
     ///
     /// These tests verify that the validate() method correctly identifies
     /// potential issues in the configuration.
-
     /// Valid config with matching quorum and providers passes validation.
     #[test]
     fn validate_valid_config_passes() {
@@ -852,7 +849,6 @@ mod tests {
     ///
     /// These tests use `apply_env_overrides_from()` to avoid mutating
     /// process-global env vars, ensuring test isolation.
-
     /// CPTS_MIN_ALLOW overrides quorum.min_allow.
     #[test]
     fn env_override_min_allow() {

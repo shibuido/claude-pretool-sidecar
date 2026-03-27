@@ -170,7 +170,6 @@ mod tests {
     ///
     /// These tests verify that we can correctly parse the JSON payload
     /// that Claude Code sends to PreToolUse hooks via stdin.
-
     /// A minimal hook event with just tool_name and tool_input should parse.
     /// The hook_event_name field defaults to "PreToolUse" when absent.
     #[test]
@@ -246,7 +245,6 @@ mod tests {
     /// # HookResponse Serialization Tests
     ///
     /// These tests verify that responses match Claude Code's expected format.
-
     /// Allow response produces correct hookSpecificOutput format.
     #[test]
     fn allow_response_format() {

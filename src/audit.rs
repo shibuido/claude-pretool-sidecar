@@ -345,7 +345,6 @@ mod tests {
     use tempfile::TempDir;
 
     /// # Audit Entry Serialization Tests
-
     /// An audit entry should serialize to valid JSON with all fields.
     #[test]
     fn audit_entry_serializes_to_json() {
@@ -402,7 +401,6 @@ mod tests {
     }
 
     /// # Date-Based Log File Tests
-
     /// Writing to a dated log should create a file named audit-YYYY-MM-DD.jsonl.
     #[test]
     fn dated_log_creates_file_with_date() {
@@ -424,7 +422,6 @@ mod tests {
     }
 
     /// # Truncation Tests
-
     /// Truncating a file should keep only recent lines and add a sentinel.
     #[test]
     fn truncate_keeps_recent_lines() {
@@ -453,7 +450,6 @@ mod tests {
     }
 
     /// # Total Size Enforcement Tests
-
     /// When total size exceeds limit, oldest files should be deleted.
     #[test]
     fn enforce_total_size_deletes_oldest() {
@@ -473,7 +469,6 @@ mod tests {
     }
 
     /// # Current Datetime Tests
-
     /// current_datetime should produce valid ISO 8601 format.
     #[test]
     fn datetime_format_is_valid() {
@@ -487,7 +482,6 @@ mod tests {
     }
 
     /// # Tool Use ID Correlation Tests
-
     /// tool_use_id should appear in audit entry JSON when present.
     #[test]
     fn audit_entry_includes_tool_use_id_when_present() {
@@ -533,7 +527,6 @@ mod tests {
     }
 
     /// # Tool Result Summary Tests
-
     /// Summarize a successful text result with byte count.
     #[test]
     fn summarize_tool_result_success_with_content() {
