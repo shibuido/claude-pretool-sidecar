@@ -1,6 +1,6 @@
 # Programmatic QA Test Checklist
 
-*Last updated: 2026-03-22*
+*Last updated: 2026-03-27*
 
 This document maps automated test scripts to the features they cover. Each script in `qa/scripts/` is listed with its test cases.
 
@@ -83,6 +83,51 @@ This document maps automated test scripts to the features they cover. Each scrip
 | 6 | Realistic payloads | Bash, Write, Edit, Read payloads all work |
 | 7 | Exit code | Always exits 0 on successful processing |
 
+### `qa/scripts/standalone-plugin-structure.sh` — Plugin Structure Validation
+
+| # | Test | Checks |
+|---|------|--------|
+| 1 | plugin.json valid | Valid JSON with name and description fields |
+| 2 | hooks.json valid | Valid JSON with top-level `hooks` key |
+| 3 | SKILL.md frontmatter | All SKILL.md files have YAML frontmatter with name and description |
+| 4 | Expected skills exist | configure-sidecar, diagnose-sidecar, file-issue directories present |
+| 5 | Scripts executable | All plugin/scripts/*.sh are executable |
+| 6 | Resources non-empty | config-schema.md, hook-setup.md, troubleshooting.md exist and non-empty |
+| 7 | No broken refs | Resource path references in SKILL.md files resolve correctly |
+| 8 | README exists | plugin/README.md present and non-empty |
+
+### `qa/scripts/standalone-plugin-hooks.sh` — Plugin Hook Configuration
+
+| # | Test | Checks |
+|---|------|--------|
+| 1 | PreToolUse matcher | Matcher is `*` (matches all tools) |
+| 2 | PostToolUse matcher | Matcher is `*` (matches all tools) |
+| 3 | PreToolUse command | References `claude-pretool-sidecar` |
+| 4 | PostToolUse command | References `claude-pretool-sidecar` |
+| 5 | PostToolUse flag | Command includes `--post-tool` flag |
+| 6 | SessionStart exists | SessionStart hook present, references check-sidecar.sh |
+| 7 | PreToolUse timeout | Timeout within 5-30s range |
+| 8 | PostToolUse timeout | Timeout within 5-30s range |
+| 9 | SessionStart timeout | Timeout within 1-10s range |
+| 10 | Hook types | All hook types are `command` |
+| 11 | Event count | Exactly 3 hook events (SessionStart, PreToolUse, PostToolUse) |
+
+### `qa/scripts/standalone-plugin-scripts.sh` — Plugin Scripts Validation
+
+| # | Test | Checks |
+|---|------|--------|
+| 1 | check-sidecar runs | check-sidecar.sh exits 0 (or skipped if binary not in PATH) |
+| 2 | check-sidecar quiet | `--quiet` suppresses non-error output |
+| 3 | check-sidecar help | `--help` exits 0 and documents flags |
+| 4 | install creates JSON | install-hooks.sh --scope project creates valid settings with hooks |
+| 5 | install idempotent | Running install twice does not duplicate hooks |
+| 6 | install preserves | Existing hooks preserved when installing sidecar hooks |
+| 7 | install help | `--help` exits 0 and documents --scope |
+| 8 | uninstall removes | uninstall-hooks.sh removes sidecar hooks from settings |
+| 9 | uninstall preserves | Non-sidecar hooks preserved after uninstall |
+| 10 | uninstall missing file | Exits 0 gracefully when settings file does not exist |
+| 11 | uninstall help | `--help` exits 0 and documents --scope |
+
 ### `qa/scripts/live-claude-code-hook-install.sh` — Hook Installation (requires CC CLI)
 
 | # | Test | Checks |
@@ -124,6 +169,9 @@ qa/scripts/standalone-providers.sh
 qa/scripts/standalone-quorum.sh
 qa/scripts/standalone-audit.sh
 qa/scripts/standalone-hook-format.sh
+qa/scripts/standalone-plugin-structure.sh
+qa/scripts/standalone-plugin-hooks.sh
+qa/scripts/standalone-plugin-scripts.sh
 ```
 
 ### In Docker:
