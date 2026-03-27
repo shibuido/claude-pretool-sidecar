@@ -27,12 +27,89 @@ Verify the installation:
 bash plugin/scripts/check-sidecar.sh
 ```
 
+## Hook Installation
+
+The plugin provides hooks that route tool calls through the sidecar. There are two ways to set them up:
+
+### Automatic (SessionStart Check)
+
+When the plugin loads, a **SessionStart** hook automatically runs `check-sidecar.sh --quiet` to verify the binary is available. If the binary is missing, a failure message is shown at the start of the session.
+
+### Install Hooks to Settings (Recommended)
+
+Use `install-hooks.sh` to merge the sidecar hooks into your Claude Code settings. This works alongside any existing hooks you have configured.
+
+**Project-level** (recommended -- applies to current project only):
+
+```bash
+bash plugin/scripts/install-hooks.sh --scope project
+```
+
+This writes to `.claude/settings.local.json`, which is typically gitignored and personal to you.
+
+**User-level** (applies to all projects):
+
+```bash
+bash plugin/scripts/install-hooks.sh --scope user
+```
+
+This writes to `~/.claude/settings.json`.
+
+#### Key behaviors
+
+* **Non-destructive**: Existing hooks are preserved. The sidecar hooks are appended alongside them.
+* **Idempotent**: Running the install script multiple times does not create duplicate entries.
+* **Creates files if needed**: If the settings file or directory does not exist, they are created.
+* **Validates JSON**: The script validates JSON before and after writing.
+
+### Uninstall Hooks
+
+To remove sidecar hooks while preserving all other hooks:
+
+```bash
+bash plugin/scripts/uninstall-hooks.sh --scope project
+bash plugin/scripts/uninstall-hooks.sh --scope user
+```
+
+### How Hooks Integrate with Existing Hooks
+
+Claude Code settings support multiple hooks per event. When you install sidecar hooks via `install-hooks.sh`, they are appended to the existing `PreToolUse` and `PostToolUse` arrays. Multiple hooks for the same event run in sequence, so existing hooks continue to work as before.
+
+For example, if you already have a custom PreToolUse hook:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "my-custom-check" }] }
+    ]
+  }
+}
+```
+
+After running `install-hooks.sh`, the file will contain both:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "my-custom-check" }] },
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "claude-pretool-sidecar", "timeout": 30 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "claude-pretool-sidecar --post-tool", "timeout": 10 }] }
+    ]
+  }
+}
+```
+
 ## What the Plugin Provides
 
 ### Hooks
 
-The plugin registers two hooks that route all tool calls through the sidecar:
+The plugin registers hooks that route all tool calls through the sidecar:
 
+* **SessionStart** -- Verifies the sidecar binary is available when a session begins.
 * **PreToolUse** -- Before any tool executes, the sidecar distributes the request to configured providers, aggregates their votes, and returns an allow/deny/passthrough decision.
 * **PostToolUse** -- After tool execution, the sidecar logs the result for audit and pattern analysis.
 
@@ -56,7 +133,9 @@ Reference documents available to skills and users:
 
 ### Scripts
 
-* `scripts/check-sidecar.sh` -- Health check script that verifies binary installation, config file presence, config validation, and hook registration.
+* `scripts/check-sidecar.sh` -- Health check script that verifies binary installation, config file presence, config validation, and hook registration. Supports `--quiet` (errors only) and `--install-hint` (suggests install script) flags.
+* `scripts/install-hooks.sh` -- Installs sidecar hooks into Claude Code settings (project or user scope). Non-destructive, idempotent.
+* `scripts/uninstall-hooks.sh` -- Removes sidecar hooks from Claude Code settings. Preserves other hooks.
 
 ## Configuration
 
