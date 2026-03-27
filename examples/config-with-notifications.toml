@@ -1,0 +1,23 @@
+# Example: sidecar config with desktop notifications
+#
+# The "desktop-notify" provider sends a system notification whenever
+# Claude Code requests tool approval. It runs as FYI (output ignored
+# by quorum), so it never blocks tool execution.
+#
+# Environment variables for the notifier:
+#   CPTS_NOTIFY_URGENCY  — low/normal/critical (default: normal)
+#   CPTS_NOTIFY_TIMEOUT  — display time in ms (default: 5000)
+#   CPTS_NOTIFY_DISABLE  — set to "1" to silence notifications
+
+[quorum]
+min_allow = 1
+
+[[providers]]
+name = "policy-checker"
+command = "/usr/local/bin/my-checker"
+mode = "vote"
+
+[[providers]]
+name = "desktop-notify"
+command = "claude-pretool-notifier"
+mode = "fyi"
