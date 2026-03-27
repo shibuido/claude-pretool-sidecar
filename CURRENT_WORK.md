@@ -1,56 +1,37 @@
 # Current Work — claude-pretool-sidecar
 
-*Last updated: 2026-03-24*
+*Last updated: 2026-03-27*
 
-## Phase 1: Foundation — MOSTLY DONE
+## Status: All phases through Phase 6 complete
 
-### 1.1 Research & Architecture — DONE
+All planned features have been implemented, tested, and pushed to
+https://github.com/shibuido/claude-pretool-sidecar
 
-* [x] Save initial voice transcript
-* [x] Research Claude Code Hooks (PreToolUse, PostToolUse, 25+ events, input/output JSON)
-* [x] Research Claude Code Plugins (structure, manifest, skills, resources, hooks)
-* [x] Research Claude Code Permissions (--permission-prompt-tool, settings locations)
-* [x] Synthesize into architecture document (`docs/design/architecture.md`)
+### Binaries (4)
 
-### 1.2 Core Design Documents — DONE
+* `claude-pretool-sidecar` — core sidecar (hook → providers → quorum → decision)
+* `claude-pretool-logger` — FYI logger companion
+* `claude-pretool-analyzer` — session summary analytics
+* `claude-pretool-notifier` — desktop notification companion
 
-* [x] Voting/quorum design (`docs/design/voting-quorum.md`)
-* [x] Configuration format design (`docs/design/configuration.md`)
-* [x] stdio protocol design (`docs/design/stdio-protocol.md`)
-* [x] Claude Code hooks reference (`docs/design/claude-code-hooks-reference.md`)
-* [x] Log rotation design (`docs/design/log-rotation.md`)
-* [x] Design guidelines summary (`docs/guidelines/README.md`)
-* [x] Testing philosophy (`docs/guidelines/testing.md`)
+### Test Totals
 
-### 1.3 Rust Project — DONE
+* 157 Rust tests (113 unit + 16 analyzer + 8 notifier + 20 integration)
+* 70 QA script tests across 8 standalone suites
+* **227 total automated tests, all passing**
 
-* [x] Initialize Cargo project with two binary targets
-* [x] Core modules: hook.rs, config.rs, quorum.rs, provider.rs, audit.rs
-* [x] FYI logger companion: src/bin/logger.rs
-* [x] 37 unit tests + 6 integration tests (43 total)
-* [x] .gitignore for Rust artifacts
+### Features Implemented
 
-### 1.4 Audit & Logging — DONE
-
-* [x] Built-in audit logging with per-provider timing
-* [x] Date-based log file chunking (audit-YYYY-MM-DD.jsonl)
-* [x] Log rotation: per-file truncation + total size enforcement
-* [x] ISO 8601 timestamps without external dependency
-
-### 1.5 QA Suite — DONE
-
-* [x] 40 automated QA tests across 5 suites (standalone-*)
-* [x] Manual test checklist (95+ items)
-* [x] Live Claude Code test scripts (live-claude-code-*)
-* [x] Docker: Dockerfile.standalone + Dockerfile.claude-code
-* [x] Docker management scripts: cpts-standalone.sh, cpts-claude-code.sh
-* [x] Helper scripts: gen-payload, gen-config, provider-echo, check-audit-log
-
-### 1.6 Remaining Phase 1 Items
-
-* [ ] Add CLI arg parsing with clap (--config, --validate, --post-tool, --passthrough)
-* [ ] Implement proper timeout enforcement for providers (TODO in provider.rs)
-* [ ] Implement CPTS_* env var overrides for config
-* [ ] Config validation: provider commands exist, quorum sanity checks
-* [ ] Create GitHub repo and push
-* [ ] Write comprehensive README.md
+* CLI: --config, --validate, --post-tool, --passthrough, --version (clap)
+* Config: TOML parsing, env var overrides (CPTS_*), validation, file discovery
+* Providers: stdio protocol, timeout enforcement (wait-timeout), weighted voting
+* Quorum: min_allow, max_deny, error_policy, weighted votes
+* Audit: date-chunked JSONL, log rotation, PostToolUse correlation (tool_use_id)
+* Cache: file-based decision caching per session with TTL
+* Health: provider error tracking, auto-disable, session-scoped persistence
+* Rules: built-in regex rule engine (fast-path, skips providers)
+* Plugin: Claude Code plugin with 3 skills, 3 resources, install/uninstall scripts
+* QA: standalone + live-claude-code test suites, 2 Docker environments
+* Packaging: LICENSE, AUR PKGBUILD, Homebrew formula, release script
+* Examples: 5 provider scripts (bash + python), 5 config templates
+* Docs: README, 8 design docs, QA checklists

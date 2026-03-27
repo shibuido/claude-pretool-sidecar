@@ -1,47 +1,23 @@
 # Future Work — claude-pretool-sidecar
 
-*Last updated: 2026-03-24*
+*Last updated: 2026-03-27*
 
-## Phase 2: Claude Code Plugin & Skills
+All originally planned phases (1–6) are complete. Below are remaining
+ideas and deferred items for future consideration.
 
-* [ ] Design and create plugin structure (.claude-plugin/plugin.json, hooks/hooks.json)
-* [ ] Plugin auto-installs PreToolUse/PostToolUse hooks when activated
-* [ ] Skill: configure-sidecar — find, create, validate, modify config files
-* [ ] Skill: diagnose-sidecar — troubleshoot config/provider/hook issues
-* [ ] Skill: file-issue — formulate and file GitHub issues via `gh` CLI
-* [ ] Bundle resources: config schema, example configs, troubleshooting guide
-* [ ] Plugin validation and testing with --plugin-dir
+## Deferred
 
-## Phase 3: PostToolUse Integration
-
-* [ ] --post-tool CLI flag for PostToolUse audit-only mode
-* [ ] Correlate PostToolUse with PreToolUse logs (session_id + tool_use_id)
-* [ ] Audit trail: which tools requested → approved → actually ran
-* [ ] Session summary analytics output (tool usage report)
-
-## Phase 4: Advanced Voting & Providers
-
-* [ ] Provider caching layer (same tool+input = cached decision within TTL)
-* [ ] Provider priority/weight system
-* [ ] Provider health monitoring (error rate tracking, auto-disable)
-* [ ] Async provider support (providers that need more time)
-
-## Phase 5: MCP Permission Tool Integration
-
-* [ ] Investigate --permission-prompt-tool as alternative integration path
-* [ ] Build MCP server wrapper around sidecar (if viable)
-
-## Phase 6: Ecosystem & Distribution
-
-* [ ] Example provider scripts (bash, python, node)
-* [ ] Packaging: cargo install (crates.io), AUR, brew formula
-* [ ] Integration with shibuido super-repository (git submodule + symlinks)
-* [ ] Comprehensive README.md with quick start, examples, architecture
+* [ ] Integration with shibuido super-repository (no super-repo collection exists yet)
+* [ ] MCP server wrapper for --permission-prompt-tool (deferred per analysis — hooks are better primary path)
 
 ## Ideas / Parking Lot
 
-* Rule-based auto-approval engine (regex patterns for tool+input matching)
-* Desktop notifications for pending approvals (notify-send/osascript)
-* Web dashboard for real-time tool approval monitoring
-* Multi-session coordination (shared state across Claude Code sessions)
-* Rate limiting per tool type
+* [ ] Web dashboard for real-time tool approval monitoring (separate project scope)
+* [ ] Multi-session coordination (shared state across Claude Code sessions)
+* [ ] Rate limiting per tool type (partially covered by rate-limiter example provider)
+* [ ] Publish to crates.io (`cargo publish`)
+* [ ] Submit AUR package
+* [ ] Submit Homebrew tap
+* [ ] CI/CD pipeline (GitHub Actions for test + release)
+* [ ] Plugin marketplace submission
+* [ ] Async provider support (long-running providers)
