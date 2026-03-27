@@ -1,0 +1,10 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ls -la"
+  },
+  "tool_use_id": "toolu_01ABC123",
+  "hook_event_name": "PostToolUse",
+  "session_id": "sess-123",
+  "tool_result": {"type": "text", "content": "total 42\ndrwxr-xr-x ..."}
+}
