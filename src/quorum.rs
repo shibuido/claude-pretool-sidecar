@@ -12,28 +12,46 @@
 
 use crate::config::QuorumConfig;
 use crate::hook::Decision;
-use crate::provider::Vote;
+use crate::provider::{Vote, WeightedVote};
 
 /// Aggregate provider votes into a single decision using quorum rules.
 ///
+/// Each vote counts as weight 1. For weighted voting, use `aggregate_weighted`.
 /// See `docs/design/voting-quorum.md` for the full algorithm specification.
 pub fn aggregate(config: &QuorumConfig, votes: &[Vote]) -> Decision {
+    let weighted: Vec<WeightedVote> = votes
+        .iter()
+        .map(|v| WeightedVote {
+            vote: v.clone(),
+            weight: 1,
+        })
+        .collect();
+    aggregate_weighted(config, &weighted)
+}
+
+/// Aggregate weighted provider votes into a single decision using quorum rules.
+///
+/// Each vote contributes its weight to the allow/deny/passthrough counts.
+/// For example, a provider with weight=2 voting "allow" adds 2 to allow_count.
+///
+/// See `docs/design/voting-quorum.md` for the full algorithm specification.
+pub fn aggregate_weighted(config: &QuorumConfig, votes: &[WeightedVote]) -> Decision {
     let mut allow_count: u32 = 0;
     let mut deny_count: u32 = 0;
     // passthrough_count tracked for completeness but not used in decision
     let mut _passthrough_count: u32 = 0;
 
-    for vote in votes {
-        match vote {
-            Vote::Allow => allow_count += 1,
-            Vote::Deny => deny_count += 1,
-            Vote::Passthrough => _passthrough_count += 1,
+    for wv in votes {
+        match wv.vote {
+            Vote::Allow => allow_count += wv.weight,
+            Vote::Deny => deny_count += wv.weight,
+            Vote::Passthrough => _passthrough_count += wv.weight,
             Vote::Error => {
                 // Apply error_policy: convert error to the configured category
                 match config.error_policy {
-                    Decision::Allow => allow_count += 1,
-                    Decision::Deny => deny_count += 1,
-                    Decision::Passthrough => _passthrough_count += 1,
+                    Decision::Allow => allow_count += wv.weight,
+                    Decision::Deny => deny_count += wv.weight,
+                    Decision::Passthrough => _passthrough_count += wv.weight,
                 }
             }
         }
@@ -230,5 +248,122 @@ mod tests {
         };
         let votes = vec![Vote::Allow, Vote::Allow, Vote::Deny];
         assert_eq!(aggregate(&config, &votes), Decision::Deny);
+    }
+
+    // --- Weighted voting tests ---
+
+    /// A single provider with weight=2 voting "allow" should meet min_allow=2.
+    #[test]
+    fn weighted_single_provider_weight2_meets_min_allow_2() {
+        let config = QuorumConfig {
+            min_allow: 2,
+            max_deny: 0,
+            ..default_config()
+        };
+        let votes = vec![WeightedVote {
+            vote: Vote::Allow,
+            weight: 2,
+        }];
+        assert_eq!(aggregate_weighted(&config, &votes), Decision::Allow);
+    }
+
+    /// A single provider with weight=1 voting "allow" should NOT meet min_allow=2.
+    #[test]
+    fn weighted_single_provider_weight1_does_not_meet_min_allow_2() {
+        let config = QuorumConfig {
+            min_allow: 2,
+            max_deny: 0,
+            ..default_config()
+        };
+        let votes = vec![WeightedVote {
+            vote: Vote::Allow,
+            weight: 1,
+        }];
+        assert_eq!(aggregate_weighted(&config, &votes), Decision::Passthrough);
+    }
+
+    /// A deny vote with weight=2 should exceed max_deny=1.
+    #[test]
+    fn weighted_deny_weight2_exceeds_max_deny_1() {
+        let config = QuorumConfig {
+            min_allow: 1,
+            max_deny: 1,
+            ..default_config()
+        };
+        let votes = vec![
+            WeightedVote {
+                vote: Vote::Allow,
+                weight: 1,
+            },
+            WeightedVote {
+                vote: Vote::Deny,
+                weight: 2,
+            },
+        ];
+        assert_eq!(aggregate_weighted(&config, &votes), Decision::Deny);
+    }
+
+    /// Mixed weights: weight=2 allow + weight=1 deny with max_deny=1.
+    /// Deny count (1) <= max_deny (1), allow count (2) >= min_allow (2) → allow.
+    #[test]
+    fn weighted_mixed_weights_allow_wins() {
+        let config = QuorumConfig {
+            min_allow: 2,
+            max_deny: 1,
+            ..default_config()
+        };
+        let votes = vec![
+            WeightedVote {
+                vote: Vote::Allow,
+                weight: 2,
+            },
+            WeightedVote {
+                vote: Vote::Deny,
+                weight: 1,
+            },
+        ];
+        assert_eq!(aggregate_weighted(&config, &votes), Decision::Allow);
+    }
+
+    /// Weighted error with error_policy=deny: error weight=3 should exceed max_deny=2.
+    #[test]
+    fn weighted_error_with_deny_policy_uses_weight() {
+        let config = QuorumConfig {
+            min_allow: 1,
+            max_deny: 2,
+            error_policy: Decision::Deny,
+            ..default_config()
+        };
+        let votes = vec![
+            WeightedVote {
+                vote: Vote::Allow,
+                weight: 1,
+            },
+            WeightedVote {
+                vote: Vote::Error,
+                weight: 3,
+            },
+        ];
+        assert_eq!(aggregate_weighted(&config, &votes), Decision::Deny);
+    }
+
+    /// Default weight (1) preserves backward compatibility with aggregate().
+    #[test]
+    fn weighted_default_weight_matches_unweighted() {
+        let config = QuorumConfig {
+            min_allow: 2,
+            max_deny: 0,
+            ..default_config()
+        };
+        let unweighted_votes = vec![Vote::Allow, Vote::Allow, Vote::Passthrough];
+        let weighted_votes = vec![
+            WeightedVote { vote: Vote::Allow, weight: 1 },
+            WeightedVote { vote: Vote::Allow, weight: 1 },
+            WeightedVote { vote: Vote::Passthrough, weight: 1 },
+        ];
+        assert_eq!(
+            aggregate(&config, &unweighted_votes),
+            aggregate_weighted(&config, &weighted_votes)
+        );
     }
 }

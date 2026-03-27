@@ -531,6 +531,76 @@ fn env_cpts_min_allow_overrides_config() {
     assert_eq!(response, serde_json::json!({}));
 }
 
+/// # Weighted Provider Changes Voting Outcome
+///
+/// A single allow provider with weight=2 should satisfy min_allow=2,
+/// which would NOT be satisfied with the default weight=1.
+#[test]
+fn weighted_provider_changes_voting_outcome() {
+    // With weight=2 and min_allow=2: single allow provider meets quorum
+    let config_weighted = format!(
+        r#"
+        [quorum]
+        min_allow = 2
+        max_deny = 0
+        default_decision = "passthrough"
+
+        [[providers]]
+        name = "allower"
+        command = "{}"
+        mode = "vote"
+        weight = 2
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let config_file = write_temp_config(&config_weighted);
+    let payload = read_payload("hook-bash-payload.json");
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file.path())
+        .write_stdin(payload.clone())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let response: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    // weight=2 satisfies min_allow=2 → allow
+    assert_eq!(extract_decision(&response), Some("allow"));
+
+    // Without weight (default=1), same config with min_allow=2 should NOT meet quorum
+    let config_unweighted = format!(
+        r#"
+        [quorum]
+        min_allow = 2
+        max_deny = 0
+        default_decision = "passthrough"
+
+        [[providers]]
+        name = "allower"
+        command = "{}"
+        mode = "vote"
+        "#,
+        fixtures_dir().join("provider-always-allow.sh").display()
+    );
+    let config_file2 = write_temp_config(&config_unweighted);
+
+    let output2 = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .env("CLAUDE_PRETOOL_SIDECAR_CONFIG", config_file2.path())
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output2.status.success());
+    let stdout2 = String::from_utf8(output2.stdout).unwrap();
+    let response2: serde_json::Value = serde_json::from_str(stdout2.trim()).unwrap();
+    // weight=1 (default) does NOT satisfy min_allow=2 → passthrough
+    assert_eq!(extract_decision(&response2), None);
+    assert_eq!(response2, serde_json::json!({}));
+}
+
 /// # CLI: --version shows version
 ///
 /// The --version flag should output the version from Cargo.toml.
