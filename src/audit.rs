@@ -33,6 +33,12 @@ pub struct AuditEntry {
     /// Session ID (if available)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Tool use ID for correlating Pre/Post entries
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+    /// Brief summary of tool result (PostToolUse only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_result_summary: Option<String>,
     /// Per-provider results with timing
     pub providers: Vec<ProviderResult>,
     /// Final aggregated decision
@@ -62,6 +68,8 @@ pub fn log_decision(
         tool_name: event.tool_name.clone(),
         tool_input: event.tool_input.clone(),
         session_id: event.session_id.clone(),
+        tool_use_id: event.tool_use_id.clone(),
+        tool_result_summary: event.tool_result.as_ref().map(summarize_tool_result),
         providers: results.to_vec(),
         final_decision: decision.to_string(),
         total_time_ms,
@@ -82,6 +90,56 @@ pub fn log_decision(
         output_dir => {
             write_to_dated_log(output_dir, &now, &json, config);
         }
+    }
+}
+
+/// Summarize a tool_result value into a brief string (max 200 chars).
+///
+/// Produces summaries like:
+/// - `"success (85 bytes)"` for a result with text content
+/// - `"error: <message>"` for error results
+/// - First 200 chars of the JSON representation, truncated with "..." if longer
+pub fn summarize_tool_result(result: &serde_json::Value) -> String {
+    // Check for error indicators
+    if let Some(obj) = result.as_object() {
+        // Check for explicit error fields
+        if let Some(err) = obj.get("error").and_then(|v| v.as_str()) {
+            let summary = format!("error: {err}");
+            return truncate_to_max(&summary, 200);
+        }
+        if obj.get("type").and_then(|v| v.as_str()) == Some("error") {
+            let msg = obj
+                .get("message")
+                .or_else(|| obj.get("content"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown error");
+            let summary = format!("error: {msg}");
+            return truncate_to_max(&summary, 200);
+        }
+        // Success with content — report byte size
+        if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
+            return format!("success ({} bytes)", content.len());
+        }
+    }
+
+    // For string results, report size
+    if let Some(s) = result.as_str() {
+        return format!("success ({} bytes)", s.len());
+    }
+
+    // Fallback: serialize and truncate
+    let json = serde_json::to_string(result).unwrap_or_else(|_| "unknown".to_string());
+    truncate_to_max(&json, 200)
+}
+
+/// Truncate a string to at most `max` characters, appending "..." if truncated.
+fn truncate_to_max(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        let mut truncated = s[..max - 3].to_string();
+        truncated.push_str("...");
+        truncated
     }
 }
 
@@ -301,6 +359,8 @@ mod tests {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::json!({"command": "ls"}),
             session_id: Some("sess-123".to_string()),
+            tool_use_id: Some("toolu_01ABC123".to_string()),
+            tool_result_summary: None,
             providers: vec![ProviderResult {
                 name: "checker".to_string(),
                 vote: Vote::Allow,
@@ -333,6 +393,8 @@ mod tests {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::json!({}),
             session_id: None,
+            tool_use_id: None,
+            tool_result_summary: None,
             providers: vec![],
             final_decision: "passthrough".to_string(),
             total_time_ms: 0,
@@ -425,5 +487,107 @@ mod tests {
         assert_eq!(&dt[7..8], "-");
         assert_eq!(&dt[10..11], "T");
         assert_eq!(&dt[19..20], "Z");
+    }
+
+    /// # Tool Use ID Correlation Tests
+
+    /// tool_use_id should appear in audit entry JSON when present.
+    #[test]
+    fn audit_entry_includes_tool_use_id_when_present() {
+        let entry = AuditEntry {
+            timestamp: "2026-03-27T10:00:00Z".to_string(),
+            hook_event: "PreToolUse".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "ls"}),
+            session_id: Some("sess-123".to_string()),
+            tool_use_id: Some("toolu_01ABC123".to_string()),
+            tool_result_summary: None,
+            providers: vec![],
+            final_decision: "allow".to_string(),
+            total_time_ms: 5,
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["tool_use_id"], "toolu_01ABC123");
+        // tool_result_summary should be omitted when None
+        assert!(parsed.get("tool_result_summary").is_none());
+    }
+
+    /// tool_use_id should be omitted from audit entry JSON when None.
+    #[test]
+    fn audit_entry_omits_tool_use_id_when_none() {
+        let entry = AuditEntry {
+            timestamp: "2026-03-27T10:00:00Z".to_string(),
+            hook_event: "PreToolUse".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({}),
+            session_id: None,
+            tool_use_id: None,
+            tool_result_summary: None,
+            providers: vec![],
+            final_decision: "passthrough".to_string(),
+            total_time_ms: 0,
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(!json.contains("tool_use_id"));
+        assert!(!json.contains("tool_result_summary"));
+    }
+
+    /// # Tool Result Summary Tests
+
+    /// Summarize a successful text result with byte count.
+    #[test]
+    fn summarize_tool_result_success_with_content() {
+        let result = serde_json::json!({
+            "type": "text",
+            "content": "total 42\ndrwxr-xr-x ..."
+        });
+        let summary = summarize_tool_result(&result);
+        assert_eq!(summary, "success (23 bytes)");
+    }
+
+    /// Summarize an error result.
+    #[test]
+    fn summarize_tool_result_error_field() {
+        let result = serde_json::json!({"error": "permission denied"});
+        let summary = summarize_tool_result(&result);
+        assert_eq!(summary, "error: permission denied");
+    }
+
+    /// Summarize an error result with type=error.
+    #[test]
+    fn summarize_tool_result_error_type() {
+        let result = serde_json::json!({"type": "error", "message": "file not found"});
+        let summary = summarize_tool_result(&result);
+        assert_eq!(summary, "error: file not found");
+    }
+
+    /// Summarize a plain string result.
+    #[test]
+    fn summarize_tool_result_string() {
+        let result = serde_json::json!("hello world");
+        let summary = summarize_tool_result(&result);
+        assert_eq!(summary, "success (11 bytes)");
+    }
+
+    /// Summary should be truncated to 200 chars max.
+    #[test]
+    fn summarize_tool_result_truncation() {
+        let long_error = "x".repeat(300);
+        let result = serde_json::json!({"error": long_error});
+        let summary = summarize_tool_result(&result);
+        assert!(summary.len() <= 200);
+        assert!(summary.ends_with("..."));
+        assert!(summary.starts_with("error: "));
+    }
+
+    /// Summarize a non-object, non-string result (fallback to JSON).
+    #[test]
+    fn summarize_tool_result_fallback() {
+        let result = serde_json::json!([1, 2, 3]);
+        let summary = summarize_tool_result(&result);
+        assert_eq!(summary, "[1,2,3]");
     }
 }

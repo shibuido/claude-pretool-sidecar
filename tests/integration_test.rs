@@ -543,3 +543,58 @@ fn cli_version_shows_version() {
         .success()
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
+
+/// # CLI: --post-tool with PostToolUse payload writes audit with tool_use_id
+///
+/// When --post-tool is set with a PostToolUse payload containing tool_use_id
+/// and tool_result, the sidecar should output `{}` and write an audit entry
+/// that includes tool_use_id and tool_result_summary.
+#[test]
+fn cli_post_tool_with_post_payload_writes_audit() {
+    let audit_dir = tempfile::TempDir::new().unwrap();
+    let config = format!(
+        r#"
+        [audit]
+        enabled = true
+        output = "{}"
+
+        [[providers]]
+        name = "denier"
+        command = "echo"
+        mode = "vote"
+        "#,
+        audit_dir.path().to_string_lossy().replace('\\', "/")
+    );
+    let config_file = write_temp_config(&config);
+    let payload = read_payload("hook-post-tool-payload.json");
+
+    let output = Command::cargo_bin("claude-pretool-sidecar")
+        .unwrap()
+        .args(["--post-tool", "--config", &config_file.path().to_string_lossy()])
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "{}");
+
+    // Read audit log and verify it contains tool_use_id and tool_result_summary
+    let audit_files: Vec<_> = std::fs::read_dir(audit_dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".jsonl"))
+        .collect();
+    assert_eq!(audit_files.len(), 1, "expected exactly one audit log file");
+
+    let audit_content = std::fs::read_to_string(audit_files[0].path()).unwrap();
+    let audit_entry: serde_json::Value = serde_json::from_str(audit_content.trim()).unwrap();
+
+    assert_eq!(audit_entry["hook_event"], "PostToolUse");
+    assert_eq!(audit_entry["tool_name"], "Bash");
+    assert_eq!(audit_entry["tool_use_id"], "toolu_01ABC123");
+    assert_eq!(audit_entry["tool_result_summary"], "success (23 bytes)");
+    assert_eq!(audit_entry["session_id"], "sess-123");
+    assert_eq!(audit_entry["final_decision"], "passthrough");
+    assert!(audit_entry["providers"].as_array().unwrap().is_empty());
+}

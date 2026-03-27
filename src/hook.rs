@@ -42,6 +42,14 @@ pub struct HookEvent {
     /// Permission mode ("ask", "allow", etc.)
     #[serde(default)]
     pub permission_mode: Option<String>,
+
+    /// Unique identifier for the tool call (for correlating Pre/Post events)
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
+
+    /// Tool result (present in PostToolUse events)
+    #[serde(default)]
+    pub tool_result: Option<serde_json::Value>,
 }
 
 fn default_hook_event_name() -> String {
@@ -191,6 +199,36 @@ mod tests {
         assert_eq!(event.session_id, Some("sess-abc123".to_string()));
         assert_eq!(event.cwd, Some("/home/user/project".to_string()));
         assert_eq!(event.permission_mode, Some("ask".to_string()));
+    }
+
+    /// A PostToolUse payload with tool_use_id and tool_result should parse.
+    #[test]
+    fn parse_post_tool_use_payload() {
+        let json = r#"{
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+            "tool_use_id": "toolu_01ABC123",
+            "hook_event_name": "PostToolUse",
+            "session_id": "sess-123",
+            "tool_result": {"type": "text", "content": "total 42\ndrwxr-xr-x ..."}
+        }"#;
+        let event = HookEvent::from_json(json).unwrap();
+        assert_eq!(event.tool_name, "Bash");
+        assert_eq!(event.hook_event_name, "PostToolUse");
+        assert_eq!(event.tool_use_id, Some("toolu_01ABC123".to_string()));
+        assert!(event.tool_result.is_some());
+        let result = event.tool_result.unwrap();
+        assert_eq!(result["type"], "text");
+        assert_eq!(result["content"], "total 42\ndrwxr-xr-x ...");
+    }
+
+    /// PreToolUse payloads without tool_use_id and tool_result should still parse.
+    #[test]
+    fn parse_pre_tool_use_without_post_fields() {
+        let json = r#"{"tool_name": "Bash", "tool_input": {"command": "ls"}}"#;
+        let event = HookEvent::from_json(json).unwrap();
+        assert!(event.tool_use_id.is_none());
+        assert!(event.tool_result.is_none());
     }
 
     /// Unknown extra fields should be silently ignored (forward compatibility).
