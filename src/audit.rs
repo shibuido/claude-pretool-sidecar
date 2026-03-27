@@ -165,19 +165,17 @@ fn write_to_dated_log(output_dir: &str, datetime: &str, entry: &str, config: &Au
     }
 
     // Check if current file exceeds per-file limit
-    if let Ok(meta) = fs::metadata(&filepath) {
-        if meta.len() > config.max_file_bytes {
+    if let Ok(meta) = fs::metadata(&filepath)
+        && meta.len() > config.max_file_bytes {
             truncate_to_recent(&filepath, config.max_file_bytes);
         }
-    }
 
     // Periodically check total directory size (use simple heuristic:
     // check when the current file is at least 10% of max_total_bytes)
-    if let Ok(meta) = fs::metadata(&filepath) {
-        if meta.len() > config.max_total_bytes / 10 {
+    if let Ok(meta) = fs::metadata(&filepath)
+        && meta.len() > config.max_total_bytes / 10 {
             enforce_total_size_limit(dir, config.max_total_bytes, config.max_file_bytes);
         }
-    }
 }
 
 /// Append a line to a file.
@@ -288,13 +286,11 @@ fn enforce_total_size_limit(dir: &Path, max_total_bytes: u64, max_file_bytes: u6
     }
 
     // If still over limit with only the current file, truncate it
-    if freed < excess {
-        if let Some(last) = log_files.last() {
-            if last.exists() {
+    if freed < excess
+        && let Some(last) = log_files.last()
+            && last.exists() {
                 truncate_to_recent(last, max_file_bytes);
             }
-        }
-    }
 }
 
 /// Collect all audit-*.jsonl files in a directory.

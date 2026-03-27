@@ -255,13 +255,12 @@ fn process_entry(stats: &mut Stats, entry: AuditEntry) {
         }
     }
 
-    if is_post {
-        if let Some(ref id) = entry.tool_use_id {
+    if is_post
+        && let Some(ref id) = entry.tool_use_id {
             stats
                 .post_tool_ids
                 .insert(id.clone(), entry.tool_name.clone());
         }
-    }
 
     stats.entries.push(entry);
 }

@@ -46,11 +46,10 @@ fn main() {
         .map(|v| v == "1")
         .unwrap_or(false);
 
-    if !disabled {
-        if let Err(e) = send_notification(TITLE, &body) {
+    if !disabled
+        && let Err(e) = send_notification(TITLE, &body) {
             eprintln!("claude-pretool-notifier: notification failed: {e}");
         }
-    }
 
     // Always output passthrough — FYI provider never blocks
     print_passthrough();

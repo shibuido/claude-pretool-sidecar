@@ -197,8 +197,8 @@ fn main() {
                 .providers
                 .iter()
                 .map(|p| {
-                    if let Some(ref tracker) = health_tracker {
-                        if !tracker.is_healthy(&p.name) {
+                    if let Some(ref tracker) = health_tracker
+                        && !tracker.is_healthy(&p.name) {
                             let stats = tracker.get_stats(&p.name);
                             let (errors, total) = stats
                                 .map(|s| (s.errors, s.total_calls))
@@ -220,7 +220,6 @@ fn main() {
                                 )),
                             });
                         }
-                    }
                     Ok(p)
                 })
                 .partition::<Vec<_>, _>(|r| r.is_ok());

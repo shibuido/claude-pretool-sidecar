@@ -525,14 +525,13 @@ impl Config {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        if let Ok(meta) = std::fs::metadata(cmd_path) {
-                            if meta.permissions().mode() & 0o111 == 0 {
+                        if let Ok(meta) = std::fs::metadata(cmd_path)
+                            && meta.permissions().mode() & 0o111 == 0 {
                                 warnings.push(format!(
                                     "provider '{}': command '{}' exists but is not executable",
                                     provider.name, provider.command
                                 ));
                             }
-                        }
                     }
                 }
             }

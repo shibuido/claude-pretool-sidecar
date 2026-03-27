@@ -148,8 +148,8 @@ fn execute_one(
     };
 
     // Write payload to stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(payload.as_bytes()) {
+    if let Some(mut stdin) = child.stdin.take()
+        && let Err(e) = stdin.write_all(payload.as_bytes()) {
             let elapsed = start.elapsed();
             let _ = child.kill();
             return ProviderResult {
@@ -163,7 +163,6 @@ fn execute_one(
             };
         }
         // Drop stdin to signal EOF
-    }
 
     // Wait for the process with timeout enforcement.
     // We use wait-timeout to avoid blocking indefinitely on slow providers.
