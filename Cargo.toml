@@ -18,6 +18,10 @@ path = "src/bin/logger.rs"
 name = "claude-pretool-analyzer"
 path = "src/bin/analyzer.rs"
 
+[[bin]]
+name = "claude-pretool-notifier"
+path = "src/bin/notifier.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
