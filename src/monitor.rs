@@ -271,12 +271,11 @@ impl LogWatcher {
         for file in &files {
             if let Ok(f) = fs::File::open(file) {
                 let reader = std::io::BufReader::new(f);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() || trimmed.contains("\"_truncated\"") {
-                            continue;
-                        }
+                for line in reader.lines().map_while(Result::ok) {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.contains("\"_truncated\"") {
+                        continue;
+                    }
                         if let Ok(entry) = serde_json::from_str::<MonitorEntry>(trimmed) {
                             entries.push(entry);
                         }

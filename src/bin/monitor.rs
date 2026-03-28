@@ -35,7 +35,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -92,7 +92,7 @@ fn main() {
 // CLI frontend
 // ---------------------------------------------------------------------------
 
-fn cmd_cli(audit_dir: &PathBuf, interval_secs: u64) {
+fn cmd_cli(audit_dir: &Path, interval_secs: u64) {
     let watcher = LogWatcher::new(audit_dir, Duration::from_millis(500));
     let mut state = MonitorState::new(200);
 
@@ -147,7 +147,7 @@ fn ctrlc_handler(running: Arc<AtomicBool>) {
 // History command
 // ---------------------------------------------------------------------------
 
-fn cmd_history(audit_dir: &PathBuf) {
+fn cmd_history(audit_dir: &Path) {
     let watcher = LogWatcher::new(audit_dir, Duration::from_secs(1));
     let mut state = MonitorState::new(50);
 
@@ -233,7 +233,7 @@ impl App {
     }
 }
 
-fn cmd_tui(audit_dir: &PathBuf) {
+fn cmd_tui(audit_dir: &Path) {
     // Load history
     let watcher = LogWatcher::new(audit_dir, Duration::from_millis(500));
     let history = watcher.read_history();
