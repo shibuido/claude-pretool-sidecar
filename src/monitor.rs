@@ -9,7 +9,7 @@
 //! - **MonitorEntry**: standalone deserialization struct (same JSONL format as audit.rs)
 //! - **MonitorState**: accumulates live statistics from ingested entries
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, Seek, SeekFrom};
@@ -22,7 +22,7 @@ use std::time::Duration;
 
 /// A single audit log entry, deserialized from JSONL.
 /// Standalone struct — does not import from audit.rs.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct MonitorEntry {
     pub timestamp: String,
     pub hook_event: String,
@@ -45,7 +45,7 @@ pub struct MonitorEntry {
 }
 
 /// Provider vote info within a monitor entry.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ProviderInfo {
     pub name: String,
     #[serde(default)]
@@ -58,14 +58,14 @@ pub struct ProviderInfo {
 }
 
 /// Per-tool accumulated statistics.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ToolStats {
     pub total: u64,
     pub decisions: HashMap<String, u64>,
 }
 
 /// Per-provider accumulated statistics.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProviderStats {
     pub invocations: u64,
     pub total_time_ms: u64,
@@ -84,7 +84,7 @@ impl ProviderStats {
 }
 
 /// Pattern statistics for auto-approval candidate detection.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct PatternStats {
     pub total: u64,
     pub allowed: u64,
@@ -276,9 +276,8 @@ impl LogWatcher {
                     if trimmed.is_empty() || trimmed.contains("\"_truncated\"") {
                         continue;
                     }
-                        if let Ok(entry) = serde_json::from_str::<MonitorEntry>(trimmed) {
-                            entries.push(entry);
-                        }
+                    if let Ok(entry) = serde_json::from_str::<MonitorEntry>(trimmed) {
+                        entries.push(entry);
                     }
                 }
             }
@@ -349,21 +348,19 @@ impl Iterator for WatchIter {
                 }
 
                 // Read new bytes from prev_size to current_size
-                if let Ok(mut f) = fs::File::open(&file) {
-                    if f.seek(SeekFrom::Start(prev_size)).is_ok() {
-                        let reader = std::io::BufReader::new(f);
-                        for line in reader.lines() {
-                            if let Ok(line) = line {
-                                let trimmed = line.trim();
-                                if trimmed.is_empty() || trimmed.contains("\"_truncated\"") {
-                                    continue;
-                                }
-                                if let Ok(entry) =
-                                    serde_json::from_str::<MonitorEntry>(trimmed)
-                                {
-                                    self.pending.push_back(entry);
-                                }
-                            }
+                if let Ok(mut f) = fs::File::open(&file)
+                    && f.seek(SeekFrom::Start(prev_size)).is_ok()
+                {
+                    let reader = std::io::BufReader::new(f);
+                    for line in reader.lines().map_while(Result::ok) {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() || trimmed.contains("\"_truncated\"") {
+                            continue;
+                        }
+                        if let Ok(entry) =
+                            serde_json::from_str::<MonitorEntry>(trimmed)
+                        {
+                            self.pending.push_back(entry);
                         }
                     }
                 }
